@@ -66,6 +66,6 @@ unhover — and the chat panel swaps to that stream's chat.
 - [ ] Shareable wall URLs (encode feed list in query string)
 
 ## Deploy
-- GitHub: github.com/<username>/streamseer
-- Vercel: streamseer.vercel.app
-- To redeploy: `vercel --prod` from this folder
+- GitHub: github.com/bipi-nx/streamseer
+- Vercel: streamseer.vercel.app (repo is connected — every push to master auto-deploys)
+- Manual redeploy if ever needed: `vercel --prod` from this folder
