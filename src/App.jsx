@@ -244,6 +244,20 @@ main{flex:1;display:flex;min-height:0}
 }
 .killbtn:hover{color:var(--red)}
 
+/* secondary control — bare icon, deliberately not the amber accent */
+.fsbtn{
+  display:flex;align-items:center;justify-content:center;flex:none;
+  background:transparent;border:none;color:var(--faint);
+  padding:2px;cursor:pointer;transition:color .15s;
+}
+.fsbtn:hover{color:var(--dim)}
+.fsbtn.on{color:var(--dim)}
+
+/* fullscreen deck: single tile, no entrance stagger (FLIP drives the motion) */
+.fsdeck .tile{animation:none}
+.tile.fs{flex:1}
+.tile.fs .corner{opacity:0}
+
 /* overflow:hidden clips the control-strip curve to this tile — without it the
    curve is drawn wider than the tile and bleeds over the neighbouring feed.
    z-index lifts the video above the fixed scanline/grain overlays so the
@@ -396,12 +410,6 @@ main{flex:1;display:flex;min-height:0}
   transition:opacity .16s ease, transform .22s cubic-bezier(.22,.9,.28,1),
     visibility 0s;
 }
-.chat-idle{
-  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:10px;color:var(--faint);text-align:center;padding:24px;
-}
-.chat-idle .glyph{font-size:26px;color:var(--line2)}
-.chat-idle p{font-size:10px;letter-spacing:.2em;line-height:2}
 
 /* ---------- empty state ---------- */
 .empty{
@@ -414,15 +422,7 @@ main{flex:1;display:flex;min-height:0}
   color:var(--text);text-shadow:0 0 44px #ffb52e2e;
 }
 .empty .mark em{color:var(--amber)}
-.empty .tag{font-size:10px;letter-spacing:.5em;color:var(--faint);margin:14px 0 34px}
-.empty .how{display:flex;border:1px solid var(--line);margin-bottom:30px}
-.empty .how div{
-  padding:14px 22px;font-size:10px;letter-spacing:.14em;color:var(--dim);line-height:1.9;
-  border-right:1px solid var(--line);
-}
-.empty .how div:last-child{border-right:none}
-.empty .how b{display:block;color:var(--amber);font-weight:600;letter-spacing:.22em}
-.empty .try{font-size:9px;letter-spacing:.3em;color:var(--faint);margin-bottom:12px}
+.empty .tag{font-size:10px;letter-spacing:.5em;color:var(--faint);margin:14px 0 36px}
 .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .chips button{
   background:transparent;border:1px solid var(--line);color:var(--dim);
@@ -533,31 +533,62 @@ function rowsFor(n) {
 }
 
 /* ---------- player mounts ---------- */
-function TwitchMount({ id, onApi }) {
+function TwitchMount({ id, onApi, onLive }) {
   const ref = useRef(null)
   useEffect(() => {
     let dead = false
+    let poll = null
     const el = ref.current
     loadTwitch().then(() => {
       if (dead || !el) return
-      const player = new window.Twitch.Player(el, {
+      const P = window.Twitch.Player
+      const player = new P(el, {
         channel: id, width: '100%', height: '100%',
         parent: [window.location.hostname], autoplay: true, muted: true,
       })
-      player.addEventListener(window.Twitch.Player.READY, () => {
+      player.addEventListener(P.READY, () => {
         if (dead) return
         onApi({
           setVol: v => player.setVolume(v),
           setMuted: m => player.setMuted(m),
         })
       })
+      /* Eligible for activation once it has actually started playing. Gates
+         the LOADING window only — mid-stream buffering or a deliberate pause
+         must NOT drop it back out, or a hiccup would yank away the audio and
+         chat. Only offline/ended makes a feed ineligible again.
+         Events alone are unreliable here (constants vary by embed version), so
+         poll the player for real playback progress as the source of truth. */
+      const up = () => { if (!dead) onLive(true) }
+      const down = () => { if (!dead) onLive(false) }
+      const on = (evt, fn) => { if (evt) { try { player.addEventListener(evt, fn) } catch { /* unsupported */ } } }
+      on(P.PLAY, up)
+      on(P.PLAYING, up)
+      on(P.ONLINE, up)
+      on(P.OFFLINE, down)
+      on(P.ENDED, down)
+
+      let last = -1
+      poll = setInterval(() => {
+        if (dead) return
+        try {
+          const t = player.getCurrentTime()
+          /* the clock advancing is the only unambiguous "it is playing" signal */
+          if (typeof t === 'number' && t > 0 && t !== last) { last = t; up() }
+        } catch { /* player not ready yet */ }
+      }, 500)
     })
-    return () => { dead = true; onApi(null); if (el) el.innerHTML = '' }
-  }, [id, onApi])
+    return () => {
+      dead = true
+      clearInterval(poll)
+      onApi(null); onLive(false)
+      if (el) el.innerHTML = ''
+    }
+  }, [id, onApi, onLive])
   return <div className="mount" ref={ref} />
 }
 
-function YouTubeMount({ id, onApi, onTitle }) {
+function YouTubeMount({ id, onApi, onTitle, onLive }) {
   const ref = useRef(null)
   useEffect(() => {
     let dead = false
@@ -580,19 +611,30 @@ function YouTubeMount({ id, onApi, onTitle }) {
               setMuted: m => (m ? e.target.mute() : e.target.unMute()),
             })
           },
+          /* PLAYING(1) marks the end of loading. UNSTARTED(-1)/BUFFERING(3)
+             mean it hasn't got there yet; ENDED(0) means there's nothing to
+             play. A pause mid-video keeps it eligible. */
+          onStateChange: e => {
+            if (dead) return
+            if (e.data === 1) onLive(true)
+            else if (e.data === 0) onLive(false)
+          },
+          onError: () => { if (!dead) onLive(false) },
         },
       })
     })
     return () => {
-      dead = true; onApi(null)
+      dead = true; onApi(null); onLive(false)
       try { if (player && player.destroy) player.destroy() } catch { /* already gone */ }
       if (el) el.innerHTML = ''
     }
-  }, [id, onApi, onTitle])
+  }, [id, onApi, onTitle, onLive])
   return <div className="mount" ref={ref} />
 }
 
-function KickMount({ id }) {
+function KickMount({ id, onLive }) {
+  /* kick exposes no player API, so there is no load/play signal to gate on —
+     treat it as eligible once its iframe has loaded */
   return (
     <div className="mount">
       <iframe
@@ -600,6 +642,7 @@ function KickMount({ id }) {
         allow="autoplay; fullscreen; encrypted-media"
         allowFullScreen
         title={`kick:${id}`}
+        onLoad={() => onLive(true)}
       />
     </div>
   )
@@ -1227,17 +1270,20 @@ function TwitchChat({ channel, visible, auth }) {
 const PLAT_TAG = { twitch: 'TTV', youtube: 'YT', kick: 'KICK' }
 
 /* ---------- tile ---------- */
-function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero,
-  onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle }) {
+function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero, fullscreen,
+  onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive, nodeRef }) {
   const shownPct = Math.round(vol * (hovered ? 150 : 100))
   const hasVolApi = stream.platform !== 'kick'
   const apiCb = useCallback(api => onApi(stream.key, api), [onApi, stream.key])
   const titleCb = useCallback(t => onTitle(stream.key, t), [onTitle, stream.key])
+  const liveCb = useCallback(v => onLive(stream.key, v), [onLive, stream.key])
 
   return (
     <div
-      className={'tile' + (hovered ? ' hov' : '') + (locked ? ' locked' : '') + (hero ? ' hero' : '')}
-      style={{ animationDelay: `${index * 60}ms` }}
+      ref={el => nodeRef(stream.key, el)}
+      className={'tile' + (hovered ? ' hov' : '') + (locked ? ' locked' : '')
+        + (hero ? ' hero' : '') + (fullscreen ? ' fs' : '')}
+      style={fullscreen ? undefined : { animationDelay: `${index * 60}ms` }}
       onMouseEnter={() => onEnter(stream.key)}
       onMouseLeave={() => onLeave(stream.key)}
     >
@@ -1245,6 +1291,26 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero,
         <span className={`plat plat-${stream.platform}`}>{PLAT_TAG[stream.platform]}</span>
         <span className="tile-name" title={stream.label}>{stream.label}</span>
         <div className="tile-ctl">
+          <button
+            className={'fsbtn' + (fullscreen ? ' on' : '')}
+            onClick={() => onFullscreen(stream.key)}
+            title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen this feed'}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen this feed'}
+          >
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none"
+              stroke="currentColor" strokeWidth="1.5" strokeLinecap="square">
+              {fullscreen ? (
+                <g>
+                  <path d="M6 1.5V6H1.5" /><path d="M8 12.5V8h4.5" />
+                </g>
+              ) : (
+                <g>
+                  <path d="M1.5 5V1.5H5" /><path d="M9 1.5h3.5V5" />
+                  <path d="M12.5 9v3.5H9" /><path d="M5 12.5H1.5V9" />
+                </g>
+              )}
+            </svg>
+          </button>
           {hasVolApi ? (
             <>
               <input
@@ -1261,9 +1327,9 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero,
         </div>
       </div>
       <div className="tile-body">
-        {stream.platform === 'twitch' && <TwitchMount id={stream.id} onApi={apiCb} />}
-        {stream.platform === 'youtube' && <YouTubeMount id={stream.id} onApi={apiCb} onTitle={titleCb} />}
-        {stream.platform === 'kick' && <KickMount id={stream.id} />}
+        {stream.platform === 'twitch' && <TwitchMount id={stream.id} onApi={apiCb} onLive={liveCb} />}
+        {stream.platform === 'youtube' && <YouTubeMount id={stream.id} onApi={apiCb} onTitle={titleCb} onLive={liveCb} />}
+        {stream.platform === 'kick' && <KickMount id={stream.id} onLive={liveCb} />}
         <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
         {!interactive && (
           <>
@@ -1296,6 +1362,7 @@ export default function App() {
   const [muted, setMuted] = useState(boot.muted)
   const [hovered, setHovered] = useState(null)
   const [locked, setLocked] = useState(null)
+  const [fullscreen, setFullscreen] = useState(null)
   const [activeChat, setActiveChat] = useState(null)
   const [interactive, setInteractive] = useState(null)
   const [chatOpen, setChatOpen] = useState(true)
@@ -1306,9 +1373,82 @@ export default function App() {
 
   const apis = useRef(new Map())
   const chatLoaded = useRef(new Set())
+  const tileEls = useRef(new Map())
+  const flip = useRef(null)   // {key, rect} captured before a fullscreen toggle
 
-  /* a locked feed stays the active one no matter where the cursor goes */
-  const active = locked || hovered
+  /* which feeds have actually started playing — a still-loading feed must
+     never become active (no solo, no gain, no zoom, no chat takeover) */
+  const [live, setLive] = useState({})
+  const liveRef = useRef(live)
+  liveRef.current = live
+
+  const onLive = useCallback((key, v) => {
+    setLive(prev => (prev[key] === v ? prev : { ...prev, [key]: v }))
+    if (!v) {
+      setHovered(h => (h === key ? null : h))
+      setLocked(l => (l === key ? null : l))
+    }
+  }, [])
+
+  /* fullscreen is an explicit click, so it wins; hover/lock only count for a
+     feed that is up and playing */
+  const eligible = key => !!key && live[key] === true
+  const active = fullscreen || (eligible(locked) ? locked : null) || (eligible(hovered) ? hovered : null)
+
+  const nodeRef = useCallback((key, el) => {
+    if (el) tileEls.current.set(key, el)
+    else tileEls.current.delete(key)
+  }, [])
+
+  const onFullscreen = useCallback(key => {
+    const el = tileEls.current.get(key)
+    flip.current = { key, rect: el ? el.getBoundingClientRect() : null }
+    setFullscreen(f => (f === key ? null : key))
+    setActiveChat(key)
+    chatLoaded.current.add(key)
+  }, [])
+
+  /* FLIP: the tile is measured before the layout change, then inverted and
+     released, so it visibly expands from where it sat into the full frame
+     (and collapses back). Cheaper and smoother than animating width/height. */
+  useLayoutEffect(() => {
+    const f = flip.current
+    flip.current = null
+    if (!f || !f.rect) return
+    const el = tileEls.current.get(f.key)
+    if (!el) return
+    const to = el.getBoundingClientRect()
+    if (!to.width || !to.height) return
+    const dx = f.rect.left - to.left
+    const dy = f.rect.top - to.top
+    const sx = f.rect.width / to.width
+    const sy = f.rect.height / to.height
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01) return
+
+    el.style.transition = 'none'
+    el.style.transformOrigin = 'top left'
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
+    el.getBoundingClientRect()   // flush the inverted position before releasing
+    requestAnimationFrame(() => {
+      el.style.transition = 'transform .44s cubic-bezier(.22,.9,.28,1)'
+      el.style.transform = 'none'
+      const done = () => {
+        el.style.transition = ''
+        el.style.transform = ''
+        el.style.transformOrigin = ''
+        el.removeEventListener('transitionend', done)
+      }
+      el.addEventListener('transitionend', done)
+    })
+  }, [fullscreen])
+
+  /* esc leaves fullscreen */
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKey = e => { if (e.key === 'Escape') onFullscreen(fullscreen) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fullscreen, onFullscreen])
 
   /* toast helper — declared before the effects below that depend on it */
   const toastTimer = useRef(null)
@@ -1426,9 +1566,11 @@ export default function App() {
   }, [say])
 
   const onKill = useCallback(key => {
+    setFullscreen(f => (f === key ? null : f))
     setStreams(prev => prev.filter(s => s.key !== key))
     setVols(prev => { const n = { ...prev }; delete n[key]; return n })
     setMuted(prev => { const n = { ...prev }; delete n[key]; return n })
+    setLive(prev => { const n = { ...prev }; delete n[key]; return n })
     apis.current.delete(key)
     chatLoaded.current.delete(key)
     setHovered(h => (h === key ? null : h))
@@ -1438,6 +1580,8 @@ export default function App() {
   }, [])
 
   const onEnter = useCallback(key => {
+    /* a feed that hasn't started playing yet is not activatable at all */
+    if (liveRef.current[key] !== true) return
     setHovered(key)
     /* a locked feed owns the chat panel — hovering elsewhere won't steal it */
     setLocked(l => {
@@ -1450,6 +1594,7 @@ export default function App() {
     setInteractive(i => (i === key ? null : i))
   }, [])
   const onLock = useCallback(key => {
+    if (liveRef.current[key] !== true) return
     setLocked(l => {
       const next = l === key ? null : key
       if (next) { setActiveChat(next); chatLoaded.current.add(next) }
@@ -1469,23 +1614,31 @@ export default function App() {
     hovered: active === s.key,
     locked: locked === s.key,
     interactive: interactive === s.key,
+    fullscreen: fullscreen === s.key,
     vol: vols[s.key] ?? DEFAULT_VOL,
     muted: muted[s.key] === true,
-    onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle,
+    onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive, nodeRef,
   })
 
+  const fsStream = fullscreen && streams.find(s => s.key === fullscreen)
+
   let wall
-  if (n === 0) {
+  if (fsStream) {
+    /* only the fullscreened feed is mounted — the rest are torn down, which
+       stops their players outright rather than merely muting them */
+    wall = (
+      <div className="deck fsdeck">
+        <div className="deckrow">
+          <Tile key={fsStream.key} {...tileProps(fsStream, 0)} />
+        </div>
+      </div>
+    )
+  } else if (n === 0) {
     wall = (
       <div className="empty">
         <div className="mark">STREAM<em>SEER</em></div>
         <div className="tag">MULTIVIEW · CONSOLE</div>
-        <div className="how">
-          <div><b>01 · PATCH IN</b>paste any twitch, youtube<br />or kick stream link above</div>
-          <div><b>02 · AUTO WALL</b>the grid re-organizes itself<br />around how many feeds are up</div>
-          <div><b>03 · SEEK BY EAR</b>hover to solo at +50% gain<br />click to lock · bottom edge = controls</div>
-        </div>
-        <div className="try">NO SIGNAL — TRY A 24/7 FEED</div>
+        {/* no instructions here — the input and the chips are the affordance */}
         <div className="chips">
           {['monstercat', 'esl_csgo', 'bobross'].map(c => (
             <button key={c} onClick={() => addStream('twitch.tv/' + c)}>twitch.tv/{c}</button>
@@ -1539,7 +1692,7 @@ export default function App() {
           <input
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="patch in a feed — twitch.tv/…  youtube.com/watch?v=…  kick.com/…"
+            placeholder="twitch.tv/…   youtube.com/watch?v=…   kick.com/…"
             spellCheck="false"
           />
           <button type="submit">+ ADD</button>
@@ -1594,9 +1747,7 @@ export default function App() {
           <aside className="chatpanel">
             <div className="chat-hd">
               <span className="lbl">CHAT</span>
-              {chatStream
-                ? <span className="who" key={chatStream.key}>{chatStream.label}</span>
-                : <span className="lbl">— AWAITING TARGET</span>}
+              {chatStream && <span className="who" key={chatStream.key}>{chatStream.label}</span>}
               {chatStream && (
                 <a className="popout" href={popoutUrl(chatStream)} target="_blank" rel="noreferrer">
                   POPOUT ↗
@@ -1614,12 +1765,7 @@ export default function App() {
                   title={`chat:${s.key}`}
                 />
               ))}
-              {!chatStream && (
-                <div className="chat-idle">
-                  <span className="glyph">◬</span>
-                  <p>HOVER A FEED<br />ITS CHAT REPORTS HERE<br />AND STAYS UNTIL THE NEXT TARGET</p>
-                </div>
-              )}
+              {/* no chat target yet — the panel stays empty, no instructions */}
             </div>
           </aside>
         )}

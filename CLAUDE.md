@@ -38,6 +38,21 @@ unhover — and the chat panel swaps to that stream's chat.
   plus 7TV global + channel emotes (channel twitch-id resolved via api.ivr.fi, emote sets
   from 7tv.io/v3; zero-width emotes overlay the previous emote). YouTube/Kick chats remain
   plain iframes — 7TV has no presence there.
+- **No instructional copy anywhere in the UI.** The user has asked twice to strip hint text
+  ("hover a feed…", the 01/02/03 empty-state panel, "TAB = EMOTES"). Interactions must be
+  discoverable without narration — do not reintroduce explainer captions, empty-state
+  how-tos, or hint strips.
+- **Loading feeds are inert**: a feed that hasn't started playing can never become active —
+  no hover-solo, no gain boost, no zoom, no chat takeover, and it can't be locked. Liveness
+  comes from the player itself (twitch: `getCurrentTime()` advancing, polled — event
+  constants vary by embed version so events alone are unreliable; youtube: `onStateChange`
+  PLAYING; kick: no API, so iframe load is the only signal). This gates the LOADING window
+  only — mid-stream buffering or a deliberate pause does NOT deactivate a feed, or a hiccup
+  would yank the audio and chat away. Only offline/ended makes a feed ineligible again.
+  NOTE: twitch embeds do not autoplay in headless chrome, so the positive path can only be
+  exercised with a stubbed `window.Twitch.Player` (see scratchpad probe15).
+- **Fullscreen**: per-tile toggle unmounts every other feed (stopping their players outright,
+  not just muting) and FLIPs the tile from its grid rect into the full frame. Esc exits.
 - **Fast-chat throughput**: incoming IRC lines buffer in a ref and commit once every
   `FLUSH_MS` (120ms), and each row is a memoised `<Msg>`. Committing per message re-rendered
   the whole 150-row backlog and re-pinned the scroll dozens of times a second, which is what
