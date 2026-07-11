@@ -669,32 +669,36 @@ function loadAuth() {
   return null
 }
 
-/* pull the token out of the redirect, verify it, learn our login name.
-   returns {ok} | {err} | null (not a redirect at all) — twitch reports
-   failures as error params, in the query on some paths and the fragment
-   on others, so check both or the failure looks like nothing happened */
-async function consumeRedirect() {
-  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
-  const frag = new URLSearchParams(hash)
+/* Grab the oauth result from the URL at MODULE SCOPE — before React mounts.
+   This is a one-shot read (it clears the hash and the state key), and under
+   StrictMode the auth effect mounts twice; doing it inside the effect meant
+   the first mount consumed the token and its teardown discarded it, leaving
+   the second mount with an empty URL. Reading it once here is immune to that. */
+const REDIRECT = (() => {
+  if (typeof window === 'undefined') return null
+  const frag = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const query = new URLSearchParams(window.location.search)
   const err = frag.get('error') || query.get('error')
   const token = frag.get('access_token')
   if (!err && !token) return null
 
-  const clean = () => history.replaceState(null, '', window.location.pathname)
+  history.replaceState(null, '', window.location.pathname)
 
   if (err) {
-    clean()
     const desc = frag.get('error_description') || query.get('error_description') || err
     return { err: desc.replace(/\+/g, ' ') }
   }
-  if (frag.get('state') !== sessionStorage.getItem('streamseer:state')) {
-    clean()
-    return { err: 'state mismatch — login blocked, try again' }
-  }
+  const expected = sessionStorage.getItem('streamseer:state')
   sessionStorage.removeItem('streamseer:state')
-  clean()
-  const ok = await validateToken(token)
+  if (frag.get('state') !== expected) return { err: 'state mismatch — login blocked, try again' }
+  return { token }
+})()
+
+/* verify the captured token and learn our login name */
+async function consumeRedirect() {
+  if (!REDIRECT) return null
+  if (REDIRECT.err) return { err: REDIRECT.err }
+  const ok = await validateToken(REDIRECT.token)
   return ok ? { ok } : { err: 'twitch rejected the token' }
 }
 
