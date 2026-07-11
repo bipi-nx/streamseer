@@ -65,18 +65,19 @@ unhover — and the chat panel swaps to that stream's chat.
   so a backgrounded kick feed can't be paused.)
 - **Keyboard** (acts on the active feed, ignored while typing in any input): `m` mute,
   `space` play/pause, `f` fullscreen, `esc` exit fullscreen, `h` hide/pin the top bar.
-- **Hidden top bar** (`h`, or the pull-tabs): the header leaves the flow when hidden, so the
-  wall claims the full viewport height. Two half-disc tabs drive it:
-  - `.bartab` — seated INSIDE the bar's bottom edge (must never overhang the wall), caret up,
-    click to hide. Only surfaces over the dead strip *between* the add-feed form and the
-    right-hand controls; the strip is measured from those elements' rects rather than guessed,
-    so padding around the controls doesn't trigger it and the tab can't overlap them.
-  - `.ceiltab` — drops from the ceiling when the bar is hidden and the cursor nears the top,
-    caret down, click to bring the bar back. The header itself does NOT peek any more.
-  Both need `header { z-index: 50 }` — above `.deck` (45), or the tiles paint over the tab and
-  swallow its clicks. State persists in localStorage so a lobby screen stays clean across
-  reloads. `h` is a no-op on an empty wall — otherwise it silently arms the hidden state and
-  the bar vanishes the moment the first feed is added.
+- **Hidden top bar** (`h`, or the caret button beside the feed count): the header leaves the
+  flow when hidden, so the wall claims the full viewport height; nudging the cursor to the top
+  edge peeks it back (it overlays, so the wall doesn't reflow). Persisted in localStorage so a
+  lobby screen stays clean across reloads. `h` is a no-op on an empty wall — otherwise it
+  silently arms the hidden state and the bar vanishes the moment the first feed is added.
+  (An earlier version used hover-triggered half-disc pull-tabs; removed — too much hover
+  activity on a wall that already reacts to hover everywhere. Keep chrome controls as plain
+  low-key buttons in the bar.)
+- **Settings** (gear beside the feed count, `SET_KEY` in localStorage, `DEFAULTS` is the
+  source of truth): hover boost amount, lock-mutes-others, new-feed volume, new-feeds-muted,
+  active-feed zoom, retro texture, chat panel width, chat text size. The hover boost feeds the
+  headroom mix (idle = `base / (1 + boost)`), so changing it re-tunes both the gain and the
+  displayed percentage.
 - **Fast-chat throughput**: incoming IRC lines buffer in a ref and commit once every
   `FLUSH_MS` (120ms), and each row is a memoised `<Msg>`. Committing per message re-rendered
   the whole 150-row backlog and re-pinned the scroll dozens of times a second, which is what

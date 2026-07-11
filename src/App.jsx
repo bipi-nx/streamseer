@@ -8,10 +8,29 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
    ============================================================ */
 
 const MAX_FEEDS = 12
-const DEFAULT_VOL = 0.5
 const STORE_KEY = 'streamseer:v1'
 const AUTH_KEY = 'streamseer:auth'
 const CHROME_KEY = 'streamseer:chrome'
+const SET_KEY = 'streamseer:settings'
+
+const DEFAULTS = {
+  boost: 0.5,          // hover gain, +50%
+  soloOnLock: true,    // locking a feed mutes the rest
+  startVol: 0.5,       // level new feeds arrive at
+  startMuted: false,   // ...and whether they arrive muted
+  chatWidth: 340,
+  chatSize: 13,        // twitch's own is 13px
+  texture: true,       // scanlines / grain / vignette on the chrome
+  zoom: true,          // the active tile grows
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SET_KEY)
+    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) }
+  } catch { /* corrupt — fall back */ }
+  return { ...DEFAULTS }
+}
 const MAX_MSGS = 150     // twitch's own scrollback depth
 const FLUSH_MS = 120     // commit incoming chat in batches, not per-message
 
@@ -67,6 +86,10 @@ body::after{ /* scanlines */
   content:'';position:fixed;inset:0;pointer-events:none;z-index:41;opacity:.5;
   background:repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.12) 2px 3px);
 }
+/* texture off — kill the CRT/vignette layers entirely */
+.app.no-texture ~ *, body:has(.app.no-texture)::before, body:has(.app.no-texture)::after{
+  display:none;
+}
 .grain{ /* film grain */
   position:fixed;inset:-100px;pointer-events:none;z-index:42;opacity:.05;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -89,29 +112,6 @@ header{
   position:relative;z-index:50;
 }
 
-/* pull-tab: a translucent half-disc seated INSIDE the bottom edge of the bar,
-   centred — it must never overhang the wall. Only appears over dead space in
-   the bar (see onBarMove); the caret points where the bar is about to travel. */
-.bartab{
-  position:absolute;left:50%;bottom:0;z-index:6;
-  width:54px;height:21px;padding:0 0 2px;
-  transform:translate(-50%, 4px) scale(.94);
-  border:1px solid var(--line);border-bottom:none;
-  border-radius:54px 54px 0 0 / 21px 21px 0 0;
-  background:#0c0f14cc;backdrop-filter:blur(6px);
-  display:flex;align-items:center;justify-content:center;
-  color:var(--dim);cursor:pointer;
-  opacity:0;pointer-events:none;
-  transition:opacity .18s ease, transform .24s cubic-bezier(.22,.9,.28,1),
-    color .15s, border-color .15s, background .15s;
-}
-.bartab.on{
-  opacity:1;pointer-events:auto;
-  transform:translate(-50%, 0) scale(1);
-}
-.bartab:hover{
-  color:var(--amber);border-color:#ffb52e66;background:#16100acc;
-}
 
 /* Chrome hidden: the header leaves the flow entirely (so the wall claims the
    full height) and overlays on demand — nudging the cursor to the top edge
@@ -124,31 +124,12 @@ header{
   background:linear-gradient(180deg,#11151df2,#0c0f14f2);
   backdrop-filter:blur(6px);
 }
-/* the strip you aim at to bring the bar back */
-.peekzone{
-  position:absolute;top:0;left:0;right:0;height:14px;z-index:69;
+/* hidden bar: aim at the top edge and it slides back down */
+.peekzone{position:absolute;top:0;left:0;right:0;height:14px;z-index:69}
+.app.chrome-off.peek > header{
+  transform:none;opacity:1;pointer-events:auto;
+  box-shadow:0 12px 34px #000a;
 }
-
-/* with the bar hidden, the same half-disc drops from the ceiling carrying a
-   down caret — click it to bring the bar back */
-.ceiltab{
-  position:absolute;top:0;left:50%;z-index:71;
-  width:54px;height:21px;padding:2px 0 0;
-  transform:translate(-50%, -100%) scale(.94);
-  border:1px solid var(--line);border-top:none;
-  border-radius:0 0 54px 54px / 0 0 21px 21px;
-  background:#0c0f14cc;backdrop-filter:blur(6px);
-  display:flex;align-items:center;justify-content:center;
-  color:var(--dim);cursor:pointer;
-  opacity:0;pointer-events:none;
-  transition:opacity .18s ease, transform .24s cubic-bezier(.22,.9,.28,1),
-    color .15s, border-color .15s, background .15s;
-}
-.ceiltab.on{
-  opacity:1;pointer-events:auto;
-  transform:translate(-50%, 0) scale(1);
-}
-.ceiltab:hover{color:var(--amber);border-color:#ffb52e66;background:#16100acc}
 .brand{display:flex;align-items:center;gap:12px;user-select:none}
 .brand-bars{display:flex;align-items:flex-end;gap:2px;height:20px}
 .brand-bars i{width:3px;background:var(--amber);animation:bar 1.1s ease-in-out infinite;transform-origin:bottom}
@@ -507,6 +488,70 @@ main{flex:1;display:flex;min-height:0}
 }
 .chips button:hover{border-color:var(--amber);color:var(--amber);background:#ffb52e0d}
 
+/* ---------- settings ---------- */
+.scrim{position:fixed;inset:0;z-index:80;background:#04060959}
+.settings{
+  position:fixed;top:66px;right:14px;z-index:81;width:330px;
+  max-height:calc(100vh - 90px);overflow-y:auto;
+  background:#0a0d13f7;border:1px solid var(--line);
+  box-shadow:0 22px 60px #000c;backdrop-filter:blur(8px);
+  animation:tileIn .18s ease both;
+  scrollbar-width:thin;scrollbar-color:#33405494 transparent;
+}
+.set-hd{
+  position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;
+  padding:11px 12px;border-bottom:1px solid var(--line);background:var(--panel2);
+  font-size:10px;letter-spacing:.28em;color:var(--text);
+}
+.set-x{background:transparent;border:none;color:var(--faint);cursor:pointer;
+  font-family:var(--mono);font-size:12px;padding:2px 4px;line-height:1}
+.set-x:hover{color:var(--red)}
+.set-grp{
+  padding:12px 12px 5px;font-size:8px;letter-spacing:.3em;color:var(--amber);
+}
+.set-row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:8px 12px;
+}
+.set-row:hover{background:#ffffff05}
+.set-lbl{font-size:11px;color:var(--text);line-height:1.35}
+.set-lbl em{display:block;font-style:normal;font-size:9px;color:var(--faint);margin-top:2px}
+.set-ctl{display:flex;align-items:center;gap:8px;flex:none}
+.set-ctl input[type=range]{
+  appearance:none;-webkit-appearance:none;width:96px;height:2px;
+  background:var(--line2);outline:none;cursor:pointer;
+}
+.set-ctl input[type=range]::-webkit-slider-thumb{
+  appearance:none;-webkit-appearance:none;width:9px;height:14px;
+  background:var(--amber);border:none;cursor:pointer;
+}
+.set-ctl input[type=range]::-moz-range-thumb{
+  width:9px;height:14px;background:var(--amber);border:none;border-radius:0;cursor:pointer;
+}
+.set-val{font-size:10px;color:var(--dim);width:42px;text-align:right}
+
+.toggle{
+  width:34px;height:18px;flex:none;padding:0;cursor:pointer;
+  background:#080a0e;border:1px solid var(--line);border-radius:10px;
+  position:relative;transition:background .18s, border-color .18s;
+}
+.toggle i{
+  position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
+  background:var(--faint);transition:transform .18s cubic-bezier(.22,.9,.28,1), background .18s;
+}
+.toggle.on{background:#ffb52e1f;border-color:#ffb52e80}
+.toggle.on i{transform:translateX(16px);background:var(--amber)}
+
+.set-foot{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);margin-top:6px}
+.set-reset,.set-clear{
+  flex:1;background:transparent;border:1px solid var(--line);color:var(--dim);
+  font-family:var(--mono);font-size:9px;letter-spacing:.16em;padding:8px 6px;cursor:pointer;
+  transition:all .15s;
+}
+.set-reset:hover{border-color:var(--amber);color:var(--amber)}
+.set-clear:hover:not(:disabled){border-color:var(--red);color:var(--red)}
+.set-clear:disabled{opacity:.35;cursor:default}
+
 /* ---------- toast ---------- */
 .toast{
   position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:60;
@@ -618,10 +663,11 @@ function rowsFor(n) {
 const GROW = 1.75   // the active tile's share of its row
 const ROW_GROW = 1.55
 
-function computeLayout(streams, active) {
+function computeLayout(streams, activeKey, zoom = true) {
   const out = new Map()
   const n = streams.length
   if (!n) return out
+  const active = zoom ? activeKey : null   // zoom off → the grid stays even
 
   /* 3 feeds: hero on the left, two stacked right — hovering a small one
      dethrones the hero rather than reordering (reordering would yank the
@@ -1137,7 +1183,7 @@ async function validateToken(token) {
   }
 }
 
-function TwitchChat({ channel, visible, auth }) {
+function TwitchChat({ channel, visible, auth, fontSize }) {
   const [msgs, setMsgs] = useState([])
   const [emoteMap, setEmoteMap] = useState(() => new Map())
   const [status, setStatus] = useState('sync')
@@ -1355,6 +1401,7 @@ function TwitchChat({ channel, visible, auth }) {
     <div className={'stchat chatpane' + (visible ? ' on' : '')}>
       <div
         className="msgs" ref={scrollRef}
+        style={fontSize ? { fontSize: fontSize + 'px', lineHeight: Math.round(fontSize * 1.55) + 'px' } : undefined}
         onScroll={e => {
           const el = e.currentTarget
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
@@ -1438,8 +1485,8 @@ function TwitchGlyph() {
 
 /* ---------- tile ---------- */
 function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, hidden, fullscreen,
-  onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive }) {
-  const shownPct = Math.round(vol * (hovered ? 150 : 100))
+  boost, onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive }) {
+  const shownPct = Math.round(vol * 100 * (hovered ? 1 + boost : 1))
   const hasVolApi = stream.platform !== 'kick'
   const apiCb = useCallback(api => onApi(stream.key, api), [onApi, stream.key])
   const titleCb = useCallback(t => onTitle(stream.key, t), [onTitle, stream.key])
@@ -1530,6 +1577,30 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, h
   )
 }
 
+/* ---------- settings widgets ---------- */
+function Row({ label, hint, value, children }) {
+  return (
+    <div className="set-row">
+      <div className="set-lbl">
+        {label}
+        {hint && <em>{hint}</em>}
+      </div>
+      <div className="set-ctl">
+        {children}
+        {value && <span className="set-val">{value}</span>}
+      </div>
+    </div>
+  )
+}
+
+function Toggle({ on, onClick }) {
+  return (
+    <button className={'toggle' + (on ? ' on' : '')} onClick={onClick} role="switch" aria-checked={on}>
+      <i />
+    </button>
+  )
+}
+
 /* ---------- persistence ---------- */
 function loadStore() {
   try {
@@ -1559,8 +1630,9 @@ export default function App() {
     try { return localStorage.getItem(CHROME_KEY) === '1' } catch { return false }
   })
   const [peek, setPeek] = useState(false)
-  const [tabOn, setTabOn] = useState(false)
-  const [tabX, setTabX] = useState(null)   // px from the bar's left edge
+  const [settings, setSettings] = useState(loadSettings)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const set = useCallback((k, v) => setSettings(s => ({ ...s, [k]: v })), [])
   const [input, setInput] = useState('')
   const [toast, setToast] = useState(null)
   const [auth, setAuth] = useState(loadAuth)
@@ -1651,6 +1723,10 @@ export default function App() {
     localStorage.setItem(CHROME_KEY, chromeOff ? '1' : '0')
   }, [chromeOff])
 
+  useEffect(() => {
+    localStorage.setItem(SET_KEY, JSON.stringify(settings))
+  }, [settings])
+
   /* peek the hidden bar when the cursor reaches the top edge; drop it again
      once the cursor moves well clear, so it can't sit half-open */
   useEffect(() => {
@@ -1729,13 +1805,18 @@ export default function App() {
     for (const s of streams) {
       const api = apis.current.get(s.key)
       if (!api) continue
-      const base = vols[s.key] ?? DEFAULT_VOL
-      api.setVol(active === s.key ? base : base / 1.5)
+      /* headroom mix: the player can't amplify past its own max, so idle feeds
+         sit at base/(1+boost) and the active one gets the full range — a true
+         boost at any level rather than one that clips */
+      const base = vols[s.key] ?? settings.startVol
+      const head = 1 + settings.boost
+      api.setVol(active === s.key ? base : base / head)
       /* Only a LOCK solos. Hovering boosts the target's gain but leaves the
          others audible — muting on mere hover made the mix flicker as the
          cursor crossed the wall. Unlocking restores each feed to its own mute
          state and level, since nothing here is persisted on the feeds. */
-      api.setMuted(muted[s.key] === true || (locked !== null && locked !== s.key))
+      const soloed = settings.soloOnLock && locked !== null && locked !== s.key
+      api.setMuted(muted[s.key] === true || soloed)
 
       /* fullscreen backgrounds the others: pause rather than unmount, so they
          stop streaming but come straight back without reloading. only fire on
@@ -1788,10 +1869,12 @@ export default function App() {
       if (prev.some(s => s.platform === parsed.platform && s.id === parsed.id)) {
         say('FEED ALREADY ON THE WALL'); return prev
       }
-      return [...prev, { ...parsed, key: `${parsed.platform}:${parsed.id}` }]
+      const key = `${parsed.platform}:${parsed.id}`
+      if (settings.startMuted) setMuted(m => ({ ...m, [key]: true }))
+      return [...prev, { ...parsed, key }]
     })
     setInput('')
-  }, [say])
+  }, [say, settings.startMuted])
 
   const onKill = useCallback(key => {
     setFullscreen(f => (f === key ? null : f))
@@ -1849,7 +1932,7 @@ export default function App() {
   /* layout is a set of %-rects over one flat container; a fullscreened tile
      takes the whole deck and the rest stay MOUNTED but hidden (and paused) —
      unmounting them would reload every player on the way back out */
-  const layout = computeLayout(streams, active)
+  const layout = computeLayout(streams, active, settings.zoom)
   const rectFor = key => {
     if (fullscreen === key) return { l: 0, t: 0, w: 100, h: 100 }
     return layout.get(key) || { l: 0, t: 0, w: 100, h: 100 }
@@ -1863,10 +1946,12 @@ export default function App() {
     locked: locked === s.key,
     interactive: interactive === s.key,
     fullscreen: fullscreen === s.key,
-    vol: vols[s.key] ?? DEFAULT_VOL,
+    vol: vols[s.key] ?? settings.startVol,
+    boost: settings.boost,
     /* what the feed is ACTUALLY doing — its own mute, or silenced because
        another feed holds the lock. the icon must show the truth either way. */
-    muted: muted[s.key] === true || (locked !== null && locked !== s.key),
+    muted: muted[s.key] === true
+      || (settings.soloOnLock && locked !== null && locked !== s.key),
     onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive,
   })
 
@@ -1898,68 +1983,13 @@ export default function App() {
      no way to add a feed */
   const barHidden = chromeOff && n > 0
 
-  /* the pull-tab only surfaces over dead space in the bar — never while the
-     cursor is on a control, where it would just be in the way */
-  /* The tab lives in the dead strip BETWEEN the add-feed form and the
-     right-hand controls — measured, not guessed, so the padding around the
-     controls doesn't trigger it and the tab can never overlap them. */
-  const onBarMove = e => {
-    if (!n) return
-    if (e.target.closest('.bartab')) { setTabOn(true); return }   // keep it up under the cursor
-
-    const hdr = e.currentTarget
-    const form = hdr.querySelector('.addform')
-    const right = hdr.querySelector('.hd-right')
-    const box = hdr.getBoundingClientRect()
-    const from = form ? form.getBoundingClientRect().right : box.left
-    const to = right ? right.getBoundingClientRect().left : box.right
-
-    if (to - from < 72 || e.clientX <= from || e.clientX >= to) { setTabOn(false); return }
-    setTabX(Math.round((from + to) / 2 - box.left))
-    setTabOn(true)
-  }
-
   return (
-    <div className={'app' + (barHidden ? ' chrome-off' : '') + (barHidden && peek ? ' peek' : '')}>
+    <div className={'app' + (barHidden ? ' chrome-off' : '') + (barHidden && peek ? ' peek' : '')
+      + (settings.texture ? '' : ' no-texture')}>
       <style>{css}</style>
-      <div className="grain" />
-      {barHidden && (
-        <>
-          <div className="peekzone" onMouseEnter={() => setPeek(true)} />
-          <button
-            className={'ceiltab' + (peek ? ' on' : '')}
-            onMouseEnter={() => setPeek(true)}
-            onClick={() => setChromeOff(false)}
-            title="Show the bar (h)"
-            aria-label="Show the bar"
-          >
-            <svg width="14" height="9" viewBox="0 0 14 9" fill="none"
-              stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1.5 2.5 7 7.5l5.5-5" />
-            </svg>
-          </button>
-        </>
-      )}
-      <header
-        onMouseMove={onBarMove}
-        onMouseLeave={() => setTabOn(false)}
-      >
-        {n > 0 && (
-          <button
-            className={'bartab' + (tabOn ? ' on' : '')}
-            style={tabX == null ? undefined : { left: tabX + 'px' }}
-            onMouseEnter={() => setTabOn(true)}
-            onClick={() => setChromeOff(true)}
-            title="Hide the bar (h)"
-            aria-label="Hide the bar"
-          >
-            {/* caret points the way the bar travels — up, out of sight */}
-            <svg width="14" height="9" viewBox="0 0 14 9" fill="none"
-              stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1.5 6.5 7 1.5l5.5 5" />
-            </svg>
-          </button>
-        )}
+      {settings.texture && <div className="grain" />}
+      {barHidden && <div className="peekzone" onMouseEnter={() => setPeek(true)} />}
+      <header>
         <div className="brand">
           <div className="brand-bars"><i /><i /><i /><i /><i /></div>
           <h1>STREAM<em>SEER</em><small>MULTIVIEW CONSOLE</small></h1>
@@ -1975,6 +2005,31 @@ export default function App() {
         </form>
         <div className="hd-right">
           <span className="feedcount"><b>{String(n).padStart(2, '0')}</b>/{MAX_FEEDS}</span>
+          {n > 0 && (
+            <button
+              className="chatbtn"
+              onClick={() => setChromeOff(v => !v)}
+              title={barHidden ? 'Show the bar (h)' : 'Hide the bar (h)'}
+              aria-label={barHidden ? 'Show the bar' : 'Hide the bar'}
+            >
+              <svg width="14" height="9" viewBox="0 0 14 9" fill="none"
+                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                {barHidden ? <path d="M1.5 2.5 7 7.5l5.5-5" /> : <path d="M1.5 6.5 7 1.5l5.5 5" />}
+              </svg>
+            </button>
+          )}
+          <button
+            className={'chatbtn' + (settingsOpen ? ' on' : '')}
+            onClick={() => setSettingsOpen(v => !v)}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
+              stroke="currentColor" strokeWidth="1.3">
+              <circle cx="8" cy="8" r="2.3" />
+              <path d="M8 1v1.8M8 13.2V15M15 8h-1.8M2.8 8H1M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3M12.9 12.9l-1.3-1.3M4.4 4.4 3.1 3.1" />
+            </svg>
+          </button>
           {/* auth is per-platform and only offered for platforms actually on
               the wall — a twitch login is noise if you're only watching yt */}
           {TWITCH_CLIENT_ID && hasTwitch && (auth ? (
@@ -2020,7 +2075,7 @@ export default function App() {
       <main>
         {wall}
         {chatOpen && (
-          <aside className="chatpanel">
+          <aside className="chatpanel" style={{ width: settings.chatWidth + 'px' }}>
             <div className="chat-hd">
               <span className="lbl">CHAT</span>
               {chatStream && <span className="who" key={chatStream.key}>{chatStream.label}</span>}
@@ -2032,7 +2087,8 @@ export default function App() {
             </div>
             <div className="chat-body">
               {chatFeeds.map(s => s.platform === 'twitch' ? (
-                <TwitchChat key={s.key} channel={s.id} visible={activeChat === s.key} auth={auth} />
+                <TwitchChat key={s.key} channel={s.id} visible={activeChat === s.key} auth={auth}
+                  fontSize={settings.chatSize} />
               ) : (
                 <iframe
                   key={s.key}
@@ -2046,6 +2102,69 @@ export default function App() {
           </aside>
         )}
       </main>
+
+      {settingsOpen && (
+        <>
+          <div className="scrim" onClick={() => setSettingsOpen(false)} />
+          <div className="settings" role="dialog" aria-label="Settings">
+            <div className="set-hd">
+              <span>SETTINGS</span>
+              <button className="set-x" onClick={() => setSettingsOpen(false)} aria-label="Close">✕</button>
+            </div>
+
+            <div className="set-grp">AUDIO</div>
+            <Row label="Hover boost" value={`+${Math.round(settings.boost * 100)}%`}>
+              <input type="range" min="0" max="100" step="5"
+                value={Math.round(settings.boost * 100)}
+                onChange={e => set('boost', Number(e.target.value) / 100)} />
+            </Row>
+            <Row label="Lock mutes others" hint="Locking a feed silences the rest">
+              <Toggle on={settings.soloOnLock} onClick={() => set('soloOnLock', !settings.soloOnLock)} />
+            </Row>
+            <Row label="New feed volume" value={`${Math.round(settings.startVol * 100)}%`}>
+              <input type="range" min="0" max="100" step="5"
+                value={Math.round(settings.startVol * 100)}
+                onChange={e => set('startVol', Number(e.target.value) / 100)} />
+            </Row>
+            <Row label="New feeds muted">
+              <Toggle on={settings.startMuted} onClick={() => set('startMuted', !settings.startMuted)} />
+            </Row>
+
+            <div className="set-grp">WALL</div>
+            <Row label="Zoom the active feed" hint="Hovered feed grows">
+              <Toggle on={settings.zoom} onClick={() => set('zoom', !settings.zoom)} />
+            </Row>
+            <Row label="Retro texture" hint="Scanlines, grain, vignette">
+              <Toggle on={settings.texture} onClick={() => set('texture', !settings.texture)} />
+            </Row>
+
+            <div className="set-grp">CHAT</div>
+            <Row label="Panel width" value={`${settings.chatWidth}px`}>
+              <input type="range" min="260" max="560" step="10"
+                value={settings.chatWidth}
+                onChange={e => set('chatWidth', Number(e.target.value))} />
+            </Row>
+            <Row label="Text size" value={`${settings.chatSize}px`}>
+              <input type="range" min="11" max="20" step="1"
+                value={settings.chatSize}
+                onChange={e => set('chatSize', Number(e.target.value))} />
+            </Row>
+
+            <div className="set-foot">
+              <button className="set-reset" onClick={() => setSettings({ ...DEFAULTS })}>
+                RESET DEFAULTS
+              </button>
+              <button
+                className="set-clear"
+                onClick={() => { streams.forEach(s => onKill(s.key)); setSettingsOpen(false) }}
+                disabled={!n}
+              >
+                CLEAR WALL
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
