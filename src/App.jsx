@@ -642,12 +642,18 @@ function MsgBody({ text, emotesTag, emoteMap }) {
 /* ---------- twitch oauth (implicit flow — no backend, no secret) ---------- */
 const SCOPES = 'chat:read chat:edit'
 
+/* twitch matches this literally against the app's registered redirect urls —
+   it must be byte-identical to one of them, trailing slash and all */
+function redirectUri() {
+  return window.location.origin + window.location.pathname.replace(/\/$/, '')
+}
+
 function beginLogin() {
   const state = Math.random().toString(36).slice(2)
   sessionStorage.setItem('streamseer:state', state)
   const p = new URLSearchParams({
     client_id: TWITCH_CLIENT_ID,
-    redirect_uri: window.location.origin + window.location.pathname,
+    redirect_uri: redirectUri(),
     response_type: 'token',
     scope: SCOPES,
     state,
@@ -663,17 +669,33 @@ function loadAuth() {
   return null
 }
 
-/* pull the token out of the redirect fragment, verify it, learn our login name */
+/* pull the token out of the redirect, verify it, learn our login name.
+   returns {ok} | {err} | null (not a redirect at all) — twitch reports
+   failures as error params, in the query on some paths and the fragment
+   on others, so check both or the failure looks like nothing happened */
 async function consumeRedirect() {
   const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
-  if (!hash.includes('access_token')) return null
-  const p = new URLSearchParams(hash)
-  const token = p.get('access_token')
-  const state = p.get('state')
-  history.replaceState(null, '', window.location.pathname + window.location.search)
-  if (!token || state !== sessionStorage.getItem('streamseer:state')) return null
+  const frag = new URLSearchParams(hash)
+  const query = new URLSearchParams(window.location.search)
+  const err = frag.get('error') || query.get('error')
+  const token = frag.get('access_token')
+  if (!err && !token) return null
+
+  const clean = () => history.replaceState(null, '', window.location.pathname)
+
+  if (err) {
+    clean()
+    const desc = frag.get('error_description') || query.get('error_description') || err
+    return { err: desc.replace(/\+/g, ' ') }
+  }
+  if (frag.get('state') !== sessionStorage.getItem('streamseer:state')) {
+    clean()
+    return { err: 'state mismatch — login blocked, try again' }
+  }
   sessionStorage.removeItem('streamseer:state')
-  return validateToken(token)
+  clean()
+  const ok = await validateToken(token)
+  return ok ? { ok } : { err: 'twitch rejected the token' }
 }
 
 async function validateToken(token) {
@@ -929,10 +951,10 @@ export default function App() {
 
   /* toast helper — declared before the effects below that depend on it */
   const toastTimer = useRef(null)
-  const say = useCallback(msg => {
+  const say = useCallback((msg, ms = 2600) => {
     setToast(msg)
     clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), 2600)
+    toastTimer.current = setTimeout(() => setToast(null), ms)
   }, [])
 
   /* persist */
@@ -945,12 +967,16 @@ export default function App() {
   useEffect(() => {
     let dead = false
     ;(async () => {
-      const fresh = await consumeRedirect()
+      const res = await consumeRedirect()
       if (dead) return
-      if (fresh) {
-        setAuth(fresh)
-        localStorage.setItem(AUTH_KEY, JSON.stringify(fresh))
-        say('CONNECTED AS ' + fresh.login.toUpperCase())
+      if (res && res.err) {
+        say('TWITCH LOGIN FAILED — ' + res.err.toUpperCase(), 8000)
+        return
+      }
+      if (res && res.ok) {
+        setAuth(res.ok)
+        localStorage.setItem(AUTH_KEY, JSON.stringify(res.ok))
+        say('CONNECTED AS ' + res.ok.login.toUpperCase())
         return
       }
       const stored = loadAuth()
