@@ -65,11 +65,18 @@ unhover — and the chat panel swaps to that stream's chat.
   so a backgrounded kick feed can't be paused.)
 - **Keyboard** (acts on the active feed, ignored while typing in any input): `m` mute,
   `space` play/pause, `f` fullscreen, `esc` exit fullscreen, `h` hide/pin the top bar.
-- **Hidden top bar** (`h`, or the button): the header leaves the flow and overlays on demand,
-  so the wall claims the full height. Nudging the cursor to the top 12px peeks it back; it
-  re-hides once the cursor drops past 76px. Persisted in localStorage so a lobby screen stays
-  clean across reloads. `h` is a no-op on an empty wall — otherwise it silently arms the
-  hidden state and the bar vanishes the moment the first feed is added.
+- **Hidden top bar** (`h`, or the pull-tabs): the header leaves the flow when hidden, so the
+  wall claims the full viewport height. Two half-disc tabs drive it:
+  - `.bartab` — seated INSIDE the bar's bottom edge (must never overhang the wall), caret up,
+    click to hide. Only surfaces over the dead strip *between* the add-feed form and the
+    right-hand controls; the strip is measured from those elements' rects rather than guessed,
+    so padding around the controls doesn't trigger it and the tab can't overlap them.
+  - `.ceiltab` — drops from the ceiling when the bar is hidden and the cursor nears the top,
+    caret down, click to bring the bar back. The header itself does NOT peek any more.
+  Both need `header { z-index: 50 }` — above `.deck` (45), or the tiles paint over the tab and
+  swallow its clicks. State persists in localStorage so a lobby screen stays clean across
+  reloads. `h` is a no-op on an empty wall — otherwise it silently arms the hidden state and
+  the bar vanishes the moment the first feed is added.
 - **Fast-chat throughput**: incoming IRC lines buffer in a ref and commit once every
   `FLUSH_MS` (120ms), and each row is a memoised `<Msg>`. Committing per message re-rendered
   the whole 150-row backlog and re-pinned the scroll dozens of times a second, which is what

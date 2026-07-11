@@ -84,6 +84,33 @@ header{
   height:58px;flex:none;display:flex;align-items:center;gap:18px;
   padding:0 16px;border-bottom:1px solid var(--line);
   background:linear-gradient(180deg,var(--panel2),var(--panel));
+  /* above .deck (z-index 45) so the pull-tab can hang over the wall and stay
+     clickable — otherwise the tiles paint on top of it and swallow the click */
+  position:relative;z-index:50;
+}
+
+/* pull-tab: a translucent half-disc seated INSIDE the bottom edge of the bar,
+   centred — it must never overhang the wall. Only appears over dead space in
+   the bar (see onBarMove); the caret points where the bar is about to travel. */
+.bartab{
+  position:absolute;left:50%;bottom:0;z-index:6;
+  width:54px;height:21px;padding:0 0 2px;
+  transform:translate(-50%, 4px) scale(.94);
+  border:1px solid var(--line);border-bottom:none;
+  border-radius:54px 54px 0 0 / 21px 21px 0 0;
+  background:#0c0f14cc;backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  color:var(--dim);cursor:pointer;
+  opacity:0;pointer-events:none;
+  transition:opacity .18s ease, transform .24s cubic-bezier(.22,.9,.28,1),
+    color .15s, border-color .15s, background .15s;
+}
+.bartab.on{
+  opacity:1;pointer-events:auto;
+  transform:translate(-50%, 0) scale(1);
+}
+.bartab:hover{
+  color:var(--amber);border-color:#ffb52e66;background:#16100acc;
 }
 
 /* Chrome hidden: the header leaves the flow entirely (so the wall claims the
@@ -97,20 +124,31 @@ header{
   background:linear-gradient(180deg,#11151df2,#0c0f14f2);
   backdrop-filter:blur(6px);
 }
-.app.chrome-off.peek > header{
-  transform:none;opacity:1;pointer-events:auto;
-  box-shadow:0 12px 34px #000a;
-}
-/* the strip you aim at to bring it back */
+/* the strip you aim at to bring the bar back */
 .peekzone{
-  position:absolute;top:0;left:0;right:0;height:10px;z-index:69;
+  position:absolute;top:0;left:0;right:0;height:14px;z-index:69;
 }
-.peekzone::after{
-  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
-  width:52px;height:3px;background:var(--amber);opacity:0;
-  transition:opacity .2s ease;
+
+/* with the bar hidden, the same half-disc drops from the ceiling carrying a
+   down caret — click it to bring the bar back */
+.ceiltab{
+  position:absolute;top:0;left:50%;z-index:71;
+  width:54px;height:21px;padding:2px 0 0;
+  transform:translate(-50%, -100%) scale(.94);
+  border:1px solid var(--line);border-top:none;
+  border-radius:0 0 54px 54px / 0 0 21px 21px;
+  background:#0c0f14cc;backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  color:var(--dim);cursor:pointer;
+  opacity:0;pointer-events:none;
+  transition:opacity .18s ease, transform .24s cubic-bezier(.22,.9,.28,1),
+    color .15s, border-color .15s, background .15s;
 }
-.peekzone:hover::after{opacity:.55}
+.ceiltab.on{
+  opacity:1;pointer-events:auto;
+  transform:translate(-50%, 0) scale(1);
+}
+.ceiltab:hover{color:var(--amber);border-color:#ffb52e66;background:#16100acc}
 .brand{display:flex;align-items:center;gap:12px;user-select:none}
 .brand-bars{display:flex;align-items:flex-end;gap:2px;height:20px}
 .brand-bars i{width:3px;background:var(--amber);animation:bar 1.1s ease-in-out infinite;transform-origin:bottom}
@@ -162,14 +200,15 @@ header{
   cursor:pointer;transition:all .15s;white-space:nowrap;
 }
 .authbtn:hover{background:#a970ff1a;box-shadow:0 0 16px #a970ff26}
-.authbtn.on{color:var(--green);border-color:#58e07c66}
-.authbtn.on:hover{background:#ff44381a;border-color:var(--red);color:var(--red)}
+/* signed in: twitch's own purple, with the twitch glyph */
+.authbtn.on{color:var(--tw);border-color:#a970ff59;background:#a970ff14}
+.authbtn.on:hover{background:#a970ff26;border-color:var(--tw);color:#c9a6ff}
 .authbtn.armed,.authbtn.armed:hover{
   color:var(--red);border-color:var(--red);background:#ff44381f;
   animation:armPulse 1s ease-in-out infinite;
 }
 @keyframes armPulse{0%,100%{box-shadow:0 0 0 0 #ff443800}50%{box-shadow:0 0 14px 0 #ff443859}}
-.authbtn .av{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.tw-glyph{flex:none;display:block}
 
 .composer{flex:none;position:relative;display:flex;gap:6px;padding:7px;
   border-top:1px solid var(--line);background:var(--panel2)}
@@ -1388,6 +1427,15 @@ function TwitchChat({ channel, visible, auth }) {
 
 const PLAT_TAG = { twitch: 'TTV', youtube: 'YT', kick: 'KICK' }
 
+function TwitchGlyph() {
+  return (
+    <svg className="tw-glyph" width="12" height="13" viewBox="0 0 24 26" fill="currentColor" aria-hidden="true">
+      <path d="M5 0 1 4.5v17h6V26l4.5-4.5H16l8-8V0H5Zm17 12.5-4.5 4.5h-5L8.5 21v-4H4V2.5h18v10Z" />
+      <path d="M12.5 6h2.5v7h-2.5V6ZM18 6h2.5v7H18V6Z" />
+    </svg>
+  )
+}
+
 /* ---------- tile ---------- */
 function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, hidden, fullscreen,
   onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive }) {
@@ -1511,6 +1559,8 @@ export default function App() {
     try { return localStorage.getItem(CHROME_KEY) === '1' } catch { return false }
   })
   const [peek, setPeek] = useState(false)
+  const [tabOn, setTabOn] = useState(false)
+  const [tabX, setTabX] = useState(null)   // px from the bar's left edge
   const [input, setInput] = useState('')
   const [toast, setToast] = useState(null)
   const [auth, setAuth] = useState(loadAuth)
@@ -1848,12 +1898,68 @@ export default function App() {
      no way to add a feed */
   const barHidden = chromeOff && n > 0
 
+  /* the pull-tab only surfaces over dead space in the bar — never while the
+     cursor is on a control, where it would just be in the way */
+  /* The tab lives in the dead strip BETWEEN the add-feed form and the
+     right-hand controls — measured, not guessed, so the padding around the
+     controls doesn't trigger it and the tab can never overlap them. */
+  const onBarMove = e => {
+    if (!n) return
+    if (e.target.closest('.bartab')) { setTabOn(true); return }   // keep it up under the cursor
+
+    const hdr = e.currentTarget
+    const form = hdr.querySelector('.addform')
+    const right = hdr.querySelector('.hd-right')
+    const box = hdr.getBoundingClientRect()
+    const from = form ? form.getBoundingClientRect().right : box.left
+    const to = right ? right.getBoundingClientRect().left : box.right
+
+    if (to - from < 72 || e.clientX <= from || e.clientX >= to) { setTabOn(false); return }
+    setTabX(Math.round((from + to) / 2 - box.left))
+    setTabOn(true)
+  }
+
   return (
     <div className={'app' + (barHidden ? ' chrome-off' : '') + (barHidden && peek ? ' peek' : '')}>
       <style>{css}</style>
       <div className="grain" />
-      {barHidden && <div className="peekzone" onMouseEnter={() => setPeek(true)} />}
-      <header>
+      {barHidden && (
+        <>
+          <div className="peekzone" onMouseEnter={() => setPeek(true)} />
+          <button
+            className={'ceiltab' + (peek ? ' on' : '')}
+            onMouseEnter={() => setPeek(true)}
+            onClick={() => setChromeOff(false)}
+            title="Show the bar (h)"
+            aria-label="Show the bar"
+          >
+            <svg width="14" height="9" viewBox="0 0 14 9" fill="none"
+              stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1.5 2.5 7 7.5l5.5-5" />
+            </svg>
+          </button>
+        </>
+      )}
+      <header
+        onMouseMove={onBarMove}
+        onMouseLeave={() => setTabOn(false)}
+      >
+        {n > 0 && (
+          <button
+            className={'bartab' + (tabOn ? ' on' : '')}
+            style={tabX == null ? undefined : { left: tabX + 'px' }}
+            onMouseEnter={() => setTabOn(true)}
+            onClick={() => setChromeOff(true)}
+            title="Hide the bar (h)"
+            aria-label="Hide the bar"
+          >
+            {/* caret points the way the bar travels — up, out of sight */}
+            <svg width="14" height="9" viewBox="0 0 14 9" fill="none"
+              stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1.5 6.5 7 1.5l5.5 5" />
+            </svg>
+          </button>
+        )}
         <div className="brand">
           <div className="brand-bars"><i /><i /><i /><i /><i /></div>
           <h1>STREAM<em>SEER</em><small>MULTIVIEW CONSOLE</small></h1>
@@ -1878,31 +1984,13 @@ export default function App() {
               onBlur={() => setArmed(false)}
               title={armed ? 'Click again to disconnect' : 'Disconnect from Twitch'}
             >
-              {armed
-                ? <>LOG OUT?</>
-                : <><i className="av" />{auth.login}</>}
+              {armed ? <>LOG OUT?</> : <><TwitchGlyph />{auth.login}</>}
             </button>
           ) : (
             <button className="authbtn" onClick={beginLogin} title="Sign in to send chat messages">
               CONNECT TWITCH
             </button>
           ))}
-          {n > 0 && (
-            <button
-              className="chatbtn"
-              onClick={() => setChromeOff(v => !v)}
-              title={chromeOff ? 'Pin the bar (h)' : 'Hide the bar (h)'}
-              aria-label={chromeOff ? 'Pin the bar' : 'Hide the bar'}
-            >
-              <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
-                <g stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="square">
-                  {chromeOff
-                    ? <><path d="M2 10.5h16" /><path d="M10 8.5V2" /><path d="M6.5 5.5 10 2l3.5 3.5" /></>
-                    : <><path d="M2 1.5h16" /><path d="M10 3.5V10" /><path d="M6.5 6.5 10 10l3.5-3.5" /></>}
-                </g>
-              </svg>
-            </button>
-          )}
           <button
             className={'chatbtn' + (chatOpen ? ' on' : '')}
             onClick={() => setChatOpen(o => !o)}
