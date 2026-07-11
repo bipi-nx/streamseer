@@ -17,9 +17,11 @@ unhover — and the chat panel swaps to that stream's chat.
   their own max, so the mix reserves headroom: idle feeds play at `vol / 1.5` of player
   range and hover uses the full range — a true, unclipped +50% at any slider level (UI
   shows up to 150%). A post-render effect pushes this to every live player.
-- **Hover solo**: while a feed is hovered, all other feeds are muted via the same effect;
-  on unhover each feed's own mute state is restored. (Kick feeds can't be soloed/muted —
-  no JS API.)
+- **Only a LOCK solos, never a hover.** Hovering boosts the target's gain but leaves the
+  other feeds audible — muting on mere hover made the mix flicker as the cursor crossed the
+  wall. Locking mutes everything else; unlocking restores each feed to its own mute state and
+  level (nothing is persisted on the feeds, so `setMuted(muted[key] || (locked && locked !==
+  key))` restores itself). Kick feeds can't be muted — no JS API.
 - **Hover zoom**: hovered tile animates `flex-grow` (1 → 1.75, hero 2 → 3) and its
   row/column gets a `.grow` class — pure CSS flex-grow transitions, no layout thrash.
 - **Hover over iframes**: cross-origin iframes swallow mouse events, so each tile is covered

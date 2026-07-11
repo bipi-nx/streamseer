@@ -251,14 +251,16 @@ main{flex:1;display:flex;min-height:0}
 }
 .killbtn:hover{color:var(--red)}
 
-/* secondary control — bare icon, deliberately not the amber accent */
-.fsbtn{
+/* secondary controls — bare icons, deliberately not the amber accent */
+.fsbtn,.iconbtn{
   display:flex;align-items:center;justify-content:center;flex:none;
   background:transparent;border:none;color:var(--faint);
   padding:2px;cursor:pointer;transition:color .15s;
 }
-.fsbtn:hover{color:var(--dim)}
+.fsbtn:hover,.iconbtn:hover{color:var(--dim)}
 .fsbtn.on{color:var(--dim)}
+.iconbtn.muted{color:var(--red);opacity:.75}
+.iconbtn.muted:hover{opacity:1;color:var(--red)}
 
 /* fullscreen deck: single tile, no entrance stagger (FLIP drives the motion) */
 .fsdeck .tile{animation:none}
@@ -1349,7 +1351,7 @@ const PLAT_TAG = { twitch: 'TTV', youtube: 'YT', kick: 'KICK' }
 
 /* ---------- tile ---------- */
 function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, hidden, fullscreen,
-  onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive }) {
+  onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive }) {
   const shownPct = Math.round(vol * (hovered ? 150 : 100))
   const hasVolApi = stream.platform !== 'kick'
   const apiCb = useCallback(api => onApi(stream.key, api), [onApi, stream.key])
@@ -1402,6 +1404,22 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, h
                 title="Feed volume"
               />
               <span className={'volpct' + (hovered && !muted ? ' boost' : '')}>{shownPct}%</span>
+              <button
+                className={'iconbtn' + (muted ? ' muted' : '')}
+                onClick={() => onMute(stream.key)}
+                title={muted ? 'Unmute (m)' : 'Mute (m)'}
+                aria-label={muted ? 'Unmute' : 'Mute'}
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
+                  stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 2.5 4.5 5.5H2v5h2.5L8 13.5z" />
+                  {muted ? (
+                    <g><path d="M11 6.5l3.5 3.5" /><path d="M14.5 6.5L11 10" /></g>
+                  ) : (
+                    <g><path d="M10.8 5.9a3 3 0 0 1 0 4.2" /><path d="M12.9 4a6 6 0 0 1 0 8" /></g>
+                  )}
+                </svg>
+              </button>
             </>
           ) : (
             <span className="novol">VOL IN PLAYER</span>
@@ -1596,9 +1614,11 @@ export default function App() {
       if (!api) continue
       const base = vols[s.key] ?? DEFAULT_VOL
       api.setVol(active === s.key ? base : base / 1.5)
-      /* the active feed solos: everything else mutes until it's released,
-         then each feed's own mute state is restored */
-      api.setMuted(muted[s.key] === true || (active !== null && active !== s.key))
+      /* Only a LOCK solos. Hovering boosts the target's gain but leaves the
+         others audible — muting on mere hover made the mix flicker as the
+         cursor crossed the wall. Unlocking restores each feed to its own mute
+         state and level, since nothing here is persisted on the feeds. */
+      api.setMuted(muted[s.key] === true || (locked !== null && locked !== s.key))
 
       /* fullscreen backgrounds the others: pause rather than unmount, so they
          stop streaming but come straight back without reloading. only fire on
@@ -1686,6 +1706,7 @@ export default function App() {
   }, [])
   const onControls = useCallback(key => setInteractive(key), [])
   const onVol = useCallback((key, v) => setVols(prev => ({ ...prev, [key]: v })), [])
+  const onMute = useCallback(key => setMuted(prev => ({ ...prev, [key]: !prev[key] })), [])
 
   /* build the wall */
   const n = streams.length
@@ -1711,7 +1732,7 @@ export default function App() {
     fullscreen: fullscreen === s.key,
     vol: vols[s.key] ?? DEFAULT_VOL,
     muted: muted[s.key] === true,
-    onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive,
+    onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive,
   })
 
   let wall
