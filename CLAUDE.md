@@ -1,9 +1,9 @@
 # StreamSeer
 
 Multiview console for watching several live streams at once. Paste Twitch / YouTube / Kick
-links; the wall lays itself out based on how many feeds are up. Hovering a feed boosts its
-volume +50% over its set level (via the Twitch/YouTube player APIs) and swaps the chat panel
-to that stream's chat.
+links; the wall lays itself out based on how many feeds are up. Hovering a feed solos it —
+the tile grows, its volume boosts +50% over its set level, every other feed mutes until
+unhover — and the chat panel swaps to that stream's chat.
 
 ## Stack
 - Vite + React (single page, no router)
@@ -17,6 +17,11 @@ to that stream's chat.
   their own max, so the mix reserves headroom: idle feeds play at `vol / 1.5` of player
   range and hover uses the full range — a true, unclipped +50% at any slider level (UI
   shows up to 150%). A post-render effect pushes this to every live player.
+- **Hover solo**: while a feed is hovered, all other feeds are muted via the same effect;
+  on unhover each feed's own mute state is restored. (Kick feeds can't be soloed/muted —
+  no JS API.)
+- **Hover zoom**: hovered tile animates `flex-grow` (1 → 1.75, hero 2 → 3) and its
+  row/column gets a `.grow` class — pure CSS flex-grow transitions, no layout thrash.
 - **Hover over iframes**: cross-origin iframes swallow mouse events, so each tile has a
   transparent `.shield` overlay that captures hover. Clicking the shield removes it until
   the mouse leaves the tile ("CLICK FOR PLAYER CONTROLS") so the native player UI stays usable.

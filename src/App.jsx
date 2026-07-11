@@ -116,18 +116,25 @@ header{
 /* ---------- main ---------- */
 main{flex:1;display:flex;min-height:0}
 .deck{flex:1;display:flex;flex-direction:column;gap:8px;padding:8px;min-width:0}
-.deckrow{flex:1;display:flex;gap:8px;min-height:0}
-.herocol{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
+.deckrow{flex:1;display:flex;gap:8px;min-height:0;
+  transition:flex-grow .4s cubic-bezier(.25,.8,.25,1)}
+.deckrow.grow{flex-grow:1.55}
+.herocol{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;
+  transition:flex-grow .4s cubic-bezier(.25,.8,.25,1)}
+.herocol.grow{flex-grow:1.45}
 
 /* ---------- tile ---------- */
 .tile{
   flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;
   background:var(--panel);border:1px solid var(--line);position:relative;
   animation:tileIn .45s cubic-bezier(.2,.9,.3,1) both;
-  transition:border-color .15s, box-shadow .2s;
+  transition:border-color .15s, box-shadow .2s,
+    flex-grow .4s cubic-bezier(.25,.8,.25,1);
 }
-.tile.hov{border-color:var(--amber);box-shadow:0 0 0 1px #ffb52e40, 0 0 34px #ffb52e1c}
+.tile.hov{border-color:var(--amber);box-shadow:0 0 0 1px #ffb52e40, 0 0 34px #ffb52e1c;
+  flex-grow:1.75}
 .tile.hero{flex:2}
+.tile.hero.hov{flex-grow:3}
 @keyframes tileIn{from{opacity:0;transform:scale(.97) translateY(8px)}to{opacity:1;transform:none}}
 
 .tile-top{
@@ -555,7 +562,9 @@ export default function App() {
       if (!api) continue
       const base = vols[s.key] ?? DEFAULT_VOL
       api.setVol(hovered === s.key ? base : base / 1.5)
-      api.setMuted(muted[s.key] === true)
+      /* hover solos the target: everything else mutes until unhover,
+         then each feed's own mute state is restored */
+      api.setMuted(muted[s.key] === true || (hovered !== null && hovered !== s.key))
     }
   })
 
@@ -642,7 +651,7 @@ export default function App() {
         <div className="how">
           <div><b>01 · PATCH IN</b>paste any twitch, youtube<br />or kick stream link above</div>
           <div><b>02 · AUTO WALL</b>the grid re-organizes itself<br />around how many feeds are up</div>
-          <div><b>03 · SEEK BY EAR</b>hover a feed → gain +50%<br />and its chat takes the panel</div>
+          <div><b>03 · SEEK BY EAR</b>hover a feed → it grows, solos<br />at +50% gain, chat takes the panel</div>
         </div>
         <div className="try">NO SIGNAL — TRY A 24/7 FEED</div>
         <div className="chips">
@@ -653,11 +662,12 @@ export default function App() {
       </div>
     )
   } else if (n === 3) {
+    const colHover = hovered === streams[1].key || hovered === streams[2].key
     wall = (
       <div className="deck">
         <div className="deckrow">
           <Tile {...tileProps(streams[0], 0, true)} />
-          <div className="herocol">
+          <div className={'herocol' + (colHover ? ' grow' : '')}>
             <Tile {...tileProps(streams[1], 1)} />
             <Tile {...tileProps(streams[2], 2)} />
           </div>
@@ -673,8 +683,9 @@ export default function App() {
           const slice = streams.slice(idx, idx + count)
           const start = idx
           idx += count
+          const rowHover = slice.some(s => s.key === hovered)
           return (
-            <div className="deckrow" key={r}>
+            <div className={'deckrow' + (rowHover ? ' grow' : '')} key={r}>
               {slice.map((s, i) => <Tile {...tileProps(s, start + i)} />)}
             </div>
           )
@@ -742,7 +753,7 @@ export default function App() {
       <div className="statusbar">
         <span className="dot" />
         <span>SIGNAL OK</span>
-        <span>HOVER = GAIN +50% · CHAT FOLLOWS CURSOR</span>
+        <span>HOVER = SOLO · GAIN +50% · CHAT FOLLOWS CURSOR</span>
         <span className="target">
           {hoveredStream
             ? <>TARGET: <b>{hoveredStream.label}</b> · GAIN {Math.round((vols[hoveredStream.key] ?? DEFAULT_VOL) * 150)}%</>
