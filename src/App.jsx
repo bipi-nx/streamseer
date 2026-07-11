@@ -121,7 +121,10 @@ main{flex:1;display:flex;min-height:0}
 .deckrow.grow{flex-grow:1.55}
 .herocol{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;
   transition:flex-grow .4s cubic-bezier(.25,.8,.25,1)}
-.herocol.grow{flex-grow:1.45}
+.herocol.grow{flex-grow:2.1}
+/* hovering a small tile in the 3-up layout dethrones the hero */
+.deckrow.colhov > .tile.hero{flex-grow:.8}
+.herocol .tile.hov{flex-grow:2.2}
 
 /* ---------- tile ---------- */
 .tile{
@@ -904,7 +907,7 @@ export default function App() {
     const colHover = hovered === streams[1].key || hovered === streams[2].key
     wall = (
       <div className="deck">
-        <div className="deckrow">
+        <div className={'deckrow' + (colHover ? ' colhov' : '')}>
           <Tile {...tileProps(streams[0], 0, true)} />
           <div className={'herocol' + (colHover ? ' grow' : '')}>
             <Tile {...tileProps(streams[1], 1)} />
