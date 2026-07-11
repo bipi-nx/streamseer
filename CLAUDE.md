@@ -22,9 +22,13 @@ unhover — and the chat panel swaps to that stream's chat.
   no JS API.)
 - **Hover zoom**: hovered tile animates `flex-grow` (1 → 1.75, hero 2 → 3) and its
   row/column gets a `.grow` class — pure CSS flex-grow transitions, no layout thrash.
-- **Hover over iframes**: cross-origin iframes swallow mouse events, so each tile has a
-  transparent `.shield` overlay that captures hover. Clicking the shield removes it until
-  the mouse leaves the tile ("CLICK FOR PLAYER CONTROLS") so the native player UI stays usable.
+- **Hover over iframes**: cross-origin iframes swallow mouse events, so each tile is covered
+  by overlays that capture hover. The top 90% (`.shield`) toggles **lock** on click; the
+  bottom 10% (`.shield-ctl`) drops both overlays so the player's own control bar underneath
+  becomes clickable (restored when the mouse leaves the tile).
+- **Lock**: clicking a feed pins it as the active one — it stays soloed, enlarged, and owns
+  the chat panel even as the cursor moves over other feeds. Clicking it again releases it.
+  `active = locked || hovered` drives audio, zoom, and chat everywhere.
 - **Chat follows cursor**: chats are created lazily on first hover and kept mounted
   (display:none) so switching back is instant.
 - **Twitch chat is custom-rendered with 7TV**: the Twitch chat embed can't be modified
@@ -34,6 +38,13 @@ unhover — and the chat panel swaps to that stream's chat.
   plus 7TV global + channel emotes (channel twitch-id resolved via api.ivr.fi, emote sets
   from 7tv.io/v3; zero-width emotes overlay the previous emote). YouTube/Kick chats remain
   plain iframes — 7TV has no presence there.
+- **Twitch login is optional**: `VITE_TWITCH_CLIENT_ID` (in `.env`, committed — implicit
+  OAuth has no secret, the ID is public). CONNECT TWITCH runs the implicit flow, the token
+  lands in the URL fragment, is validated against id.twitch.tv/oauth2/validate, and is kept
+  in localStorage; the IRC socket then authenticates with `PASS oauth:<token>` so the user
+  can send. Without a token everything still works, anonymously and read-only.
+  **The Twitch app's OAuth Redirect URLs must list every origin the site is served from**
+  (`http://localhost:5173` + the production domain) or login will fail.
 - **Layout**: `rowsFor(n)` maps feed count → row arrangement; exactly 3 feeds gets a
   hero-left layout.
 - **Default audio is ON**: every feed plays at its set level whether hovered or not; the
