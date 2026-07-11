@@ -51,8 +51,18 @@ unhover — and the chat panel swaps to that stream's chat.
   would yank the audio and chat away. Only offline/ended makes a feed ineligible again.
   NOTE: twitch embeds do not autoplay in headless chrome, so the positive path can only be
   exercised with a stubbed `window.Twitch.Player` (see scratchpad probe15).
-- **Fullscreen**: per-tile toggle unmounts every other feed (stopping their players outright,
-  not just muting) and FLIPs the tile from its grid rect into the full frame. Esc exits.
+- **Tiles must NEVER be unmounted by a layout change.** Every tile is a permanent sibling in
+  one flat `.deck`, absolutely positioned by a %-rect from `computeLayout()`; layout changes
+  are pure CSS transitions on that rect. Nesting tiles inside per-row containers (the old
+  approach) moves a tile to a different parent when the wall re-organises, which makes React
+  destroy and rebuild its iframe — i.e. every stream reloads on fullscreen / add / remove.
+  Do not reintroduce row wrappers.
+- **Fullscreen**: the tile's rect goes to 0,0,100,100; the others stay MOUNTED but hidden
+  (`.tile.off`) and paused via `api.setPaused` — pausing stops them streaming without the
+  reload that unmounting would cause on the way back out. Esc exits. (Kick has no player API,
+  so a backgrounded kick feed can't be paused.)
+- **Keyboard** (acts on the active feed, ignored while typing in any input): `m` mute,
+  `space` play/pause, `f` fullscreen, `esc` exit fullscreen.
 - **Fast-chat throughput**: incoming IRC lines buffer in a ref and commit once every
   `FLUSH_MS` (120ms), and each row is a memoised `<Msg>`. Committing per message re-rendered
   the whole 150-row backlog and re-pinned the scroll dozens of times a second, which is what

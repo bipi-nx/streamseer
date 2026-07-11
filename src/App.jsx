@@ -186,29 +186,23 @@ header{
 
 /* ---------- main ---------- */
 main{flex:1;display:flex;min-height:0}
-.deck{flex:1;display:flex;flex-direction:column;gap:8px;padding:8px;min-width:0}
-.deckrow{flex:1;display:flex;gap:8px;min-height:0;
-  transition:flex-grow .4s cubic-bezier(.25,.8,.25,1)}
-.deckrow.grow{flex-grow:1.55}
-.herocol{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;
-  transition:flex-grow .4s cubic-bezier(.25,.8,.25,1)}
-.herocol.grow{flex-grow:2.1}
-/* hovering a small tile in the 3-up layout dethrones the hero */
-.deckrow.colhov > .tile.hero{flex-grow:.8}
-.herocol .tile.hov{flex-grow:2.2}
+/* the deck is a positioning canvas — tiles are absolutely placed by %-rect */
+.deck{flex:1;position:relative;padding:4px;min-width:0;min-height:0}
 
 /* ---------- tile ---------- */
 .tile{
-  flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;
-  background:var(--panel);border:1px solid var(--line);position:relative;
+  position:absolute;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);
   animation:tileIn .45s cubic-bezier(.2,.9,.3,1) both;
-  transition:border-color .15s, box-shadow .2s,
-    flex-grow .4s cubic-bezier(.25,.8,.25,1);
+  transition:
+    left .42s cubic-bezier(.25,.8,.25,1), top .42s cubic-bezier(.25,.8,.25,1),
+    width .42s cubic-bezier(.25,.8,.25,1), height .42s cubic-bezier(.25,.8,.25,1),
+    opacity .28s ease, border-color .15s, box-shadow .2s;
 }
-.tile.hov{border-color:var(--amber);box-shadow:0 0 0 1px #ffb52e40, 0 0 34px #ffb52e1c;
-  flex-grow:1.75}
-.tile.hero{flex:2}
-.tile.hero.hov{flex-grow:3}
+.tile.hov{border-color:var(--amber);box-shadow:0 0 0 1px #ffb52e40, 0 0 34px #ffb52e1c}
+.tile.fs{z-index:20}
+/* backgrounded by fullscreen: kept mounted (no reload) but invisible + inert */
+.tile.off{opacity:0;pointer-events:none}
 @keyframes tileIn{from{opacity:0;transform:scale(.97) translateY(8px)}to{opacity:1;transform:none}}
 
 .tile-top{
@@ -519,7 +513,12 @@ function loadYT() {
   return ytReady
 }
 
-/* ---------- layout: rows adapt to how many feeds are up ---------- */
+/* ---------- layout ----------
+   Every tile is a permanent sibling in one flat container, positioned by a
+   computed %-rect. Nothing ever changes parent, so React never unmounts a
+   tile when the wall re-organises — which is what used to tear down and
+   reload the players on fullscreen / add / remove. Layout changes are pure
+   CSS transitions on the rect. */
 function rowsFor(n) {
   const table = {
     1: [1], 2: [2], 4: [2, 2], 5: [2, 3], 6: [3, 3],
@@ -530,6 +529,52 @@ function rowsFor(n) {
   const base = Math.floor(n / rows)
   const extra = n % rows
   return Array.from({ length: rows }, (_, i) => base + (i >= rows - extra ? 1 : 0))
+}
+
+const GROW = 1.75   // the active tile's share of its row
+const ROW_GROW = 1.55
+
+function computeLayout(streams, active) {
+  const out = new Map()
+  const n = streams.length
+  if (!n) return out
+
+  /* 3 feeds: hero on the left, two stacked right — hovering a small one
+     dethrones the hero rather than reordering (reordering would yank the
+     tile out from under the cursor) */
+  if (n === 3) {
+    const [a, b, c] = streams
+    const heroHot = active === a.key
+    const rightHot = active === b.key || active === c.key
+    const heroW = heroHot ? 76 : rightHot ? 44 : 62
+    const rightW = 100 - heroW
+    const bH = active === b.key ? 68 : active === c.key ? 32 : 50
+    out.set(a.key, { l: 0, t: 0, w: heroW, h: 100 })
+    out.set(b.key, { l: heroW, t: 0, w: rightW, h: bH })
+    out.set(c.key, { l: heroW, t: bH, w: rightW, h: 100 - bH })
+    return out
+  }
+
+  const rows = rowsFor(n)
+  let i = 0
+  const slices = rows.map(cnt => { const s = streams.slice(i, i + cnt); i += cnt; return s })
+  const rowW = slices.map(s => (s.some(x => x.key === active) ? ROW_GROW : 1))
+  const rowTotal = rowW.reduce((a, b) => a + b, 0)
+
+  let top = 0
+  slices.forEach((slice, r) => {
+    const h = (rowW[r] / rowTotal) * 100
+    const colW = slice.map(s => (s.key === active ? GROW : 1))
+    const colTotal = colW.reduce((a, b) => a + b, 0)
+    let left = 0
+    slice.forEach((s, k) => {
+      const w = (colW[k] / colTotal) * 100
+      out.set(s.key, { l: left, t: top, w, h })
+      left += w
+    })
+    top += h
+  })
+  return out
 }
 
 /* ---------- player mounts ---------- */
@@ -551,6 +596,8 @@ function TwitchMount({ id, onApi, onLive }) {
         onApi({
           setVol: v => player.setVolume(v),
           setMuted: m => player.setMuted(m),
+          setPaused: p => (p ? player.pause() : player.play()),
+          toggle: () => (player.isPaused() ? player.play() : player.pause()),
         })
       })
       /* Eligible for activation once it has actually started playing. Gates
@@ -609,6 +656,9 @@ function YouTubeMount({ id, onApi, onTitle, onLive }) {
             onApi({
               setVol: v => e.target.setVolume(Math.round(v * 100)),
               setMuted: m => (m ? e.target.mute() : e.target.unMute()),
+              setPaused: p => (p ? e.target.pauseVideo() : e.target.playVideo()),
+              /* 1 = PLAYING */
+              toggle: () => (e.target.getPlayerState() === 1 ? e.target.pauseVideo() : e.target.playVideo()),
             })
           },
           /* PLAYING(1) marks the end of loading. UNSTARTED(-1)/BUFFERING(3)
@@ -1270,8 +1320,8 @@ function TwitchChat({ channel, visible, auth }) {
 const PLAT_TAG = { twitch: 'TTV', youtube: 'YT', kick: 'KICK' }
 
 /* ---------- tile ---------- */
-function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero, fullscreen,
-  onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive, nodeRef }) {
+function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, hidden, fullscreen,
+  onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive }) {
   const shownPct = Math.round(vol * (hovered ? 150 : 100))
   const hasVolApi = stream.platform !== 'kick'
   const apiCb = useCallback(api => onApi(stream.key, api), [onApi, stream.key])
@@ -1280,10 +1330,15 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero, f
 
   return (
     <div
-      ref={el => nodeRef(stream.key, el)}
       className={'tile' + (hovered ? ' hov' : '') + (locked ? ' locked' : '')
-        + (hero ? ' hero' : '') + (fullscreen ? ' fs' : '')}
-      style={fullscreen ? undefined : { animationDelay: `${index * 60}ms` }}
+        + (fullscreen ? ' fs' : '') + (hidden ? ' off' : '')}
+      style={{
+        left: `calc(${rect.l}% + 4px)`,
+        top: `calc(${rect.t}% + 4px)`,
+        width: `calc(${rect.w}% - 8px)`,
+        height: `calc(${rect.h}% - 8px)`,
+        animationDelay: `${index * 60}ms`,
+      }}
       onMouseEnter={() => onEnter(stream.key)}
       onMouseLeave={() => onLeave(stream.key)}
     >
@@ -1373,8 +1428,7 @@ export default function App() {
 
   const apis = useRef(new Map())
   const chatLoaded = useRef(new Set())
-  const tileEls = useRef(new Map())
-  const flip = useRef(null)   // {key, rect} captured before a fullscreen toggle
+  const pausedNow = useRef(new Map())   // key -> last setPaused we issued
 
   /* which feeds have actually started playing — a still-loading feed must
      never become active (no solo, no gain, no zoom, no chat takeover) */
@@ -1395,60 +1449,43 @@ export default function App() {
   const eligible = key => !!key && live[key] === true
   const active = fullscreen || (eligible(locked) ? locked : null) || (eligible(hovered) ? hovered : null)
 
-  const nodeRef = useCallback((key, el) => {
-    if (el) tileEls.current.set(key, el)
-    else tileEls.current.delete(key)
-  }, [])
-
   const onFullscreen = useCallback(key => {
-    const el = tileEls.current.get(key)
-    flip.current = { key, rect: el ? el.getBoundingClientRect() : null }
     setFullscreen(f => (f === key ? null : key))
     setActiveChat(key)
     chatLoaded.current.add(key)
   }, [])
 
-  /* FLIP: the tile is measured before the layout change, then inverted and
-     released, so it visibly expands from where it sat into the full frame
-     (and collapses back). Cheaper and smoother than animating width/height. */
-  useLayoutEffect(() => {
-    const f = flip.current
-    flip.current = null
-    if (!f || !f.rect) return
-    const el = tileEls.current.get(f.key)
-    if (!el) return
-    const to = el.getBoundingClientRect()
-    if (!to.width || !to.height) return
-    const dx = f.rect.left - to.left
-    const dy = f.rect.top - to.top
-    const sx = f.rect.width / to.width
-    const sy = f.rect.height / to.height
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01) return
-
-    el.style.transition = 'none'
-    el.style.transformOrigin = 'top left'
-    el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
-    el.getBoundingClientRect()   // flush the inverted position before releasing
-    requestAnimationFrame(() => {
-      el.style.transition = 'transform .44s cubic-bezier(.22,.9,.28,1)'
-      el.style.transform = 'none'
-      const done = () => {
-        el.style.transition = ''
-        el.style.transform = ''
-        el.style.transformOrigin = ''
-        el.removeEventListener('transitionend', done)
-      }
-      el.addEventListener('transitionend', done)
-    })
-  }, [fullscreen])
-
-  /* esc leaves fullscreen */
+  /* keyboard: m mute, space play/pause, f fullscreen — all act on the active
+     feed. esc always leaves fullscreen. ignored while typing (chat composer,
+     the add-feed field) so shortcuts can't fire mid-message. */
   useEffect(() => {
-    if (!fullscreen) return
-    const onKey = e => { if (e.key === 'Escape') onFullscreen(fullscreen) }
+    const onKey = e => {
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      if (e.key === 'Escape' && fullscreen) {
+        onFullscreen(fullscreen)
+        return
+      }
+      if (!active) return
+
+      const k = e.key.toLowerCase()
+      if (k === 'm') {
+        e.preventDefault()
+        setMuted(prev => ({ ...prev, [active]: !prev[active] }))
+      } else if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault()   // otherwise the page scrolls
+        const api = apis.current.get(active)
+        if (api && api.toggle) api.toggle()
+      } else if (k === 'f') {
+        e.preventDefault()
+        onFullscreen(active)
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [fullscreen, onFullscreen])
+  }, [active, fullscreen, onFullscreen])
 
   /* toast helper — declared before the effects below that depend on it */
   const toastTimer = useRef(null)
@@ -1527,6 +1564,17 @@ export default function App() {
       /* the active feed solos: everything else mutes until it's released,
          then each feed's own mute state is restored */
       api.setMuted(muted[s.key] === true || (active !== null && active !== s.key))
+
+      /* fullscreen backgrounds the others: pause rather than unmount, so they
+         stop streaming but come straight back without reloading. only fire on
+         a change — re-issuing play() every render would fight the user. */
+      if (api.setPaused) {
+        const want = !!fullscreen && fullscreen !== s.key
+        if (pausedNow.current.get(s.key) !== want) {
+          pausedNow.current.set(s.key, want)
+          api.setPaused(want)
+        }
+      }
     }
   })
 
@@ -1609,31 +1657,30 @@ export default function App() {
   const chatStream = streams.find(s => s.key === activeChat)
   const chatFeeds = streams.filter(s => chatLoaded.current.has(s.key))
 
-  const tileProps = (s, i, hero = false) => ({
-    stream: s, index: i, hero,
+  /* layout is a set of %-rects over one flat container; a fullscreened tile
+     takes the whole deck and the rest stay MOUNTED but hidden (and paused) —
+     unmounting them would reload every player on the way back out */
+  const layout = computeLayout(streams, active)
+  const rectFor = key => {
+    if (fullscreen === key) return { l: 0, t: 0, w: 100, h: 100 }
+    return layout.get(key) || { l: 0, t: 0, w: 100, h: 100 }
+  }
+
+  const tileProps = (s, i) => ({
+    stream: s, index: i,
+    rect: rectFor(s.key),
+    hidden: !!fullscreen && fullscreen !== s.key,
     hovered: active === s.key,
     locked: locked === s.key,
     interactive: interactive === s.key,
     fullscreen: fullscreen === s.key,
     vol: vols[s.key] ?? DEFAULT_VOL,
     muted: muted[s.key] === true,
-    onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive, nodeRef,
+    onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle, onFullscreen, onLive,
   })
 
-  const fsStream = fullscreen && streams.find(s => s.key === fullscreen)
-
   let wall
-  if (fsStream) {
-    /* only the fullscreened feed is mounted — the rest are torn down, which
-       stops their players outright rather than merely muting them */
-    wall = (
-      <div className="deck fsdeck">
-        <div className="deckrow">
-          <Tile key={fsStream.key} {...tileProps(fsStream, 0)} />
-        </div>
-      </div>
-    )
-  } else if (n === 0) {
+  if (n === 0) {
     wall = (
       <div className="empty">
         <div className="mark">STREAM<em>SEER</em></div>
@@ -1646,35 +1693,12 @@ export default function App() {
         </div>
       </div>
     )
-  } else if (n === 3) {
-    const colHover = active === streams[1].key || active === streams[2].key
-    wall = (
-      <div className="deck">
-        <div className={'deckrow' + (colHover ? ' colhov' : '')}>
-          <Tile key={streams[0].key} {...tileProps(streams[0], 0, true)} />
-          <div className={'herocol' + (colHover ? ' grow' : '')}>
-            <Tile key={streams[1].key} {...tileProps(streams[1], 1)} />
-            <Tile key={streams[2].key} {...tileProps(streams[2], 2)} />
-          </div>
-        </div>
-      </div>
-    )
   } else {
-    const rows = rowsFor(n)
-    let idx = 0
+    /* one flat container, stable keys, stable parent — a tile is never
+       unmounted by a layout change, so its player never reloads */
     wall = (
       <div className="deck">
-        {rows.map((count, r) => {
-          const slice = streams.slice(idx, idx + count)
-          const start = idx
-          idx += count
-          const rowHover = slice.some(s => s.key === active)
-          return (
-            <div className={'deckrow' + (rowHover ? ' grow' : '')} key={r}>
-              {slice.map((s, i) => <Tile key={s.key} {...tileProps(s, start + i)} />)}
-            </div>
-          )
-        })}
+        {streams.map((s, i) => <Tile key={s.key} {...tileProps(s, i)} />)}
       </div>
     )
   }
