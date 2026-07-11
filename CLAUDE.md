@@ -25,8 +25,15 @@ unhover — and the chat panel swaps to that stream's chat.
 - **Hover over iframes**: cross-origin iframes swallow mouse events, so each tile has a
   transparent `.shield` overlay that captures hover. Clicking the shield removes it until
   the mouse leaves the tile ("CLICK FOR PLAYER CONTROLS") so the native player UI stays usable.
-- **Chat follows cursor**: chat iframes are created lazily on first hover and kept mounted
+- **Chat follows cursor**: chats are created lazily on first hover and kept mounted
   (display:none) so switching back is instant.
+- **Twitch chat is custom-rendered with 7TV**: the Twitch chat embed can't be modified
+  (cross-origin iframe), so `TwitchChat` connects to Twitch IRC anonymously over WebSocket
+  (`justinfan` login, read-only — POPOUT link in the header for typing), parses PRIVMSG
+  tags itself, and renders native Twitch emotes (from the `emotes` tag, codepoint-indexed)
+  plus 7TV global + channel emotes (channel twitch-id resolved via api.ivr.fi, emote sets
+  from 7tv.io/v3; zero-width emotes overlay the previous emote). YouTube/Kick chats remain
+  plain iframes — 7TV has no presence there.
 - **Layout**: `rowsFor(n)` maps feed count → row arrangement; exactly 3 feeds gets a
   hero-left layout.
 - **Default audio is ON**: every feed plays at its set level whether hovered or not; the

@@ -219,6 +219,38 @@ main{flex:1;display:flex;min-height:0}
 .chat-hd .lbl{font-size:9px;letter-spacing:.26em;color:var(--faint);white-space:nowrap}
 .chat-hd .who{font-family:var(--disp);font-weight:600;font-size:12px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-hd .popout{margin-left:auto;font-size:9px;letter-spacing:.16em;color:var(--faint);
+  text-decoration:none;border:1px solid var(--line);padding:3px 7px;white-space:nowrap;
+  transition:all .15s}
+.chat-hd .popout:hover{color:var(--amber);border-color:var(--amber)}
+
+/* ---------- custom twitch chat w/ 7tv ---------- */
+.stchat{position:absolute;inset:0;flex-direction:column;font-size:12px}
+.stchat .msgs{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 10px 10px;
+  display:flex;flex-direction:column;gap:6px;
+  scrollbar-width:thin;scrollbar-color:#33405494 transparent}
+.stchat .msgs::-webkit-scrollbar{width:6px}
+.stchat .msgs::-webkit-scrollbar-thumb{background:var(--line)}
+.msg{line-height:1.55;overflow-wrap:anywhere;animation:msgIn .15s ease both}
+@keyframes msgIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.msg .nick{font-weight:600}
+.msg .sep{color:var(--faint)}
+.msg .txt{color:var(--text)}
+.msg .txt.action{font-style:italic}
+.msg .badge{display:inline-block;font-size:8px;font-weight:600;letter-spacing:.08em;
+  border:1px solid currentColor;padding:0 3px;margin-right:4px;vertical-align:1px;line-height:1.5}
+.b-bc{color:var(--red)} .b-mod{color:var(--green)} .b-vip{color:#ff8ab5} .b-sub{color:var(--amber)}
+.emw{display:inline-block;position:relative;vertical-align:middle;margin:-4px 1px}
+.emw img{height:24px;max-width:84px;object-fit:contain;vertical-align:middle;display:inline-block}
+.emw img.zw{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+.stchat .conn{
+  flex:none;display:flex;align-items:center;gap:10px;padding:5px 10px;
+  border-top:1px solid var(--line);background:var(--panel2);
+  font-size:8px;letter-spacing:.2em;color:var(--faint);white-space:nowrap}
+.stchat .conn .st-live{color:var(--green)}
+.stchat .conn .st-sync{color:var(--amber)}
+.stchat .conn .st-reconn{color:var(--red)}
+.stchat .conn .stv{color:var(--dim);margin-left:auto}
 .chat-body{flex:1;position:relative;min-height:0}
 .chat-body iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .chat-idle{
@@ -447,9 +479,216 @@ function KickMount({ id }) {
 /* ---------- chat urls ---------- */
 function chatUrl(s) {
   const host = window.location.hostname
-  if (s.platform === 'twitch') return `https://www.twitch.tv/embed/${s.id}/chat?parent=${host}&darkpopout`
   if (s.platform === 'youtube') return `https://www.youtube.com/live_chat?v=${s.id}&embed_domain=${host}&dark_theme=1`
   return `https://kick.com/popout/${s.id}/chat`
+}
+function popoutUrl(s) {
+  if (s.platform === 'twitch') return `https://www.twitch.tv/popout/${s.id}/chat`
+  if (s.platform === 'youtube') return `https://www.youtube.com/live_chat?is_popout=1&v=${s.id}`
+  return `https://kick.com/popout/${s.id}/chat`
+}
+
+/* ============================================================
+   custom twitch chat — anonymous IRC over websocket, rendered
+   locally so 7tv channel + global emotes can be mixed in
+   ============================================================ */
+const TW_EMOTE_CDN = id => `https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/2.0`
+const NICK_COLORS = ['#ff7a59', '#58e07c', '#6fc3ff', '#ffb52e', '#d59aff', '#ff8ab5', '#7de8d8', '#c9e07a']
+
+function nickColor(tags, login) {
+  if (tags.color) return tags.color
+  let h = 0
+  for (let i = 0; i < login.length; i++) h = (h * 31 + login.charCodeAt(i)) >>> 0
+  return NICK_COLORS[h % NICK_COLORS.length]
+}
+
+/* 7tv: global set + channel set (channel looked up by twitch user id via ivr.fi) */
+async function fetch7tv(channel) {
+  const map = new Map()
+  const add = list => {
+    for (const e of list || []) {
+      const base = e.data && e.data.host && e.data.host.url
+      map.set(e.name, {
+        url: base ? `https:${base}/2x.webp` : `https://cdn.7tv.app/emote/${e.id}/2x.webp`,
+        zw: !!((e.flags & 1) || (e.data && e.data.flags & 256)),
+      })
+    }
+  }
+  try {
+    const g = await (await fetch('https://7tv.io/v3/emote-sets/global')).json()
+    add(g.emotes)
+  } catch { /* no globals — chat still works */ }
+  try {
+    const u = await (await fetch(`https://api.ivr.fi/v2/twitch/user?login=${encodeURIComponent(channel)}`)).json()
+    const id = Array.isArray(u) && u[0] && u[0].id
+    if (id) {
+      const s = await (await fetch(`https://7tv.io/v3/users/twitch/${id}`)).json()
+      add(s.emote_set && s.emote_set.emotes)
+    }
+  } catch { /* channel has no 7tv set */ }
+  return map
+}
+
+/* twitch "emotes" tag gives codepoint ranges — slice on codepoints, not utf-16 */
+function segmentTwitchEmotes(text, emotesTag) {
+  if (!emotesTag) return [{ t: 'text', s: text }]
+  const chars = Array.from(text)
+  const ranges = []
+  for (const part of emotesTag.split('/')) {
+    const [id, list] = part.split(':')
+    if (!list) continue
+    for (const r of list.split(',')) {
+      const [a, b] = r.split('-').map(Number)
+      ranges.push({ id, a, b })
+    }
+  }
+  ranges.sort((x, y) => x.a - y.a)
+  const out = []
+  let pos = 0
+  for (const r of ranges) {
+    if (r.a > pos) out.push({ t: 'text', s: chars.slice(pos, r.a).join('') })
+    out.push({ t: 'emote', id: r.id, name: chars.slice(r.a, r.b + 1).join('') })
+    pos = r.b + 1
+  }
+  if (pos < chars.length) out.push({ t: 'text', s: chars.slice(pos).join('') })
+  return out
+}
+
+const BADGE_MAP = { broadcaster: ['BC', 'b-bc'], moderator: ['MOD', 'b-mod'], vip: ['VIP', 'b-vip'], subscriber: ['SUB', 'b-sub'] }
+
+function MsgBody({ text, emotesTag, emoteMap }) {
+  const pieces = []
+  for (const seg of segmentTwitchEmotes(text, emotesTag)) {
+    if (seg.t === 'emote') {
+      pieces.push({ url: TW_EMOTE_CDN(seg.id), name: seg.name, zw: false, overlays: [] })
+    } else {
+      for (const w of seg.s.split(/(\s+)/)) {
+        if (!w) continue
+        const e = /\S/.test(w) ? emoteMap.get(w) : null
+        pieces.push(e ? { url: e.url, name: w, zw: e.zw, overlays: [] } : w)
+      }
+    }
+  }
+  /* fold zero-width 7tv emotes onto the emote before them */
+  const folded = []
+  for (const p of pieces) {
+    if (typeof p === 'object' && p.zw) {
+      let j = folded.length - 1
+      while (j >= 0 && typeof folded[j] === 'string' && !folded[j].trim()) j--
+      if (j >= 0 && typeof folded[j] === 'object') {
+        folded[j].overlays.push(p)
+        folded.length = j + 1
+        continue
+      }
+    }
+    folded.push(p)
+  }
+  return folded.map((p, i) =>
+    typeof p === 'string' ? p : (
+      <span className="emw" key={i} title={p.name}>
+        <img src={p.url} alt={p.name} loading="lazy" />
+        {p.overlays.map((o, k) => <img className="zw" key={k} src={o.url} alt={o.name} loading="lazy" />)}
+      </span>
+    )
+  )
+}
+
+function TwitchChat({ channel, visible }) {
+  const [msgs, setMsgs] = useState([])
+  const [emoteMap, setEmoteMap] = useState(() => new Map())
+  const [status, setStatus] = useState('sync')
+  const scrollRef = useRef(null)
+  const pinned = useRef(true)
+  const nextId = useRef(0)
+
+  useEffect(() => {
+    let dead = false
+    fetch7tv(channel).then(m => { if (!dead) setEmoteMap(m) })
+    return () => { dead = true }
+  }, [channel])
+
+  useEffect(() => {
+    let ws = null
+    let retry = null
+    let dead = false
+    const connect = () => {
+      ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443')
+      ws.onopen = () => {
+        ws.send('CAP REQ :twitch.tv/tags')
+        ws.send('NICK justinfan' + Math.floor(100000 + Math.random() * 900000))
+        ws.send('JOIN #' + channel)
+        setStatus('live')
+      }
+      ws.onmessage = ev => {
+        const batch = []
+        for (const line of String(ev.data).split('\r\n')) {
+          if (!line) continue
+          if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); continue }
+          const m = line.match(/^@([^ ]+) :([^!]+)![^ ]+ PRIVMSG #[^ ]+ :(.*)$/)
+          if (!m) continue
+          const tags = {}
+          for (const kv of m[1].split(';')) {
+            const eq = kv.indexOf('=')
+            tags[kv.slice(0, eq)] = kv.slice(eq + 1).replace(/\\s/g, ' ')
+          }
+          let text = m[3]
+          let action = false
+          if (text.charCodeAt(0) === 1) { action = true; text = text.slice(8, -1) }
+          batch.push({ id: ++nextId.current, login: m[2], text, tags, action })
+        }
+        if (batch.length) setMsgs(prev => {
+          const next = [...prev, ...batch]
+          return next.length > 220 ? next.slice(-160) : next
+        })
+      }
+      ws.onclose = () => {
+        if (!dead) { setStatus('reconn'); retry = setTimeout(connect, 2500) }
+      }
+    }
+    connect()
+    return () => { dead = true; clearTimeout(retry); try { if (ws) { ws.onclose = null; ws.close() } } catch { /* closed */ } }
+  }, [channel])
+
+  /* stay pinned to the newest message unless the user scrolled up */
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && pinned.current && visible) el.scrollTop = el.scrollHeight
+  }, [msgs, visible])
+
+  return (
+    <div className="stchat" style={{ display: visible ? 'flex' : 'none' }}>
+      <div
+        className="msgs" ref={scrollRef}
+        onScroll={e => {
+          const el = e.currentTarget
+          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+        }}
+      >
+        {msgs.map(msg => (
+          <div className="msg" key={msg.id}>
+            {(msg.tags.badges || '').split(',').map(b => {
+              const info = BADGE_MAP[b.split('/')[0]]
+              return info ? <span className={`badge ${info[1]}`} key={b}>{info[0]}</span> : null
+            })}
+            <span className="nick" style={{ color: nickColor(msg.tags, msg.login) }}>
+              {msg.tags['display-name'] || msg.login}
+            </span>
+            <span className="sep">{msg.action ? ' ' : ': '}</span>
+            <span className={'txt' + (msg.action ? ' action' : '')}>
+              <MsgBody text={msg.text} emotesTag={msg.tags.emotes} emoteMap={emoteMap} />
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="conn">
+        <span className={'st-' + status}>
+          {status === 'live' ? '● IRC LIVE' : status === 'sync' ? '◌ SYNCING' : '○ RECONNECTING'}
+        </span>
+        <span>ANON · READ-ONLY</span>
+        <span className="stv">7TV ×{emoteMap.size}</span>
+      </div>
+    </div>
+  )
 }
 
 const PLAT_TAG = { twitch: 'TTV', youtube: 'YT', kick: 'KICK' }
@@ -729,9 +968,16 @@ export default function App() {
               {chatStream
                 ? <span className="who">{chatStream.label}</span>
                 : <span className="lbl">— AWAITING TARGET</span>}
+              {chatStream && (
+                <a className="popout" href={popoutUrl(chatStream)} target="_blank" rel="noreferrer">
+                  POPOUT ↗
+                </a>
+              )}
             </div>
             <div className="chat-body">
-              {chatFeeds.map(s => (
+              {chatFeeds.map(s => s.platform === 'twitch' ? (
+                <TwitchChat key={s.key} channel={s.id} visible={activeChat === s.key} />
+              ) : (
                 <iframe
                   key={s.key}
                   src={chatUrl(s)}
