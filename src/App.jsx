@@ -450,7 +450,7 @@ const PLAT_TAG = { twitch: 'TTV', youtube: 'YT', kick: 'KICK' }
 /* ---------- tile ---------- */
 function Tile({ stream, hovered, interactive, vol, muted, index, hero,
   onEnter, onLeave, onShieldClick, onVol, onMute, onKill, onApi, onTitle }) {
-  const shownPct = Math.round((hovered ? Math.min(1, vol * 1.5) : vol) * 100)
+  const shownPct = Math.round(vol * (hovered ? 150 : 100))
   const hasVolApi = stream.platform !== 'kick'
   const apiCb = useCallback(api => onApi(stream.key, api), [onApi, stream.key])
   const titleCb = useCallback(t => onTitle(stream.key, t), [onTitle, stream.key])
@@ -545,13 +545,16 @@ export default function App() {
   }, [])
 
   /* push audio state to every live player (runs after every render —
-     also catches players that finish loading late) */
+     also catches players that finish loading late).
+     headroom mix: embeds can't amplify past their own max, so the player's
+     true max is "150%" on our scale — idle feeds run at base/1.5 of player
+     range, and hover uses the reserved third for an unclipped +50% boost */
   useEffect(() => {
     for (const s of streams) {
       const api = apis.current.get(s.key)
       if (!api) continue
       const base = vols[s.key] ?? DEFAULT_VOL
-      api.setVol(hovered === s.key ? Math.min(1, base * 1.5) : base)
+      api.setVol(hovered === s.key ? base : base / 1.5)
       api.setMuted(muted[s.key] === true)
     }
   })
@@ -742,7 +745,7 @@ export default function App() {
         <span>HOVER = GAIN +50% · CHAT FOLLOWS CURSOR</span>
         <span className="target">
           {hoveredStream
-            ? <>TARGET: <b>{hoveredStream.label}</b> · GAIN {Math.round(Math.min(1, (vols[hoveredStream.key] ?? DEFAULT_VOL) * 1.5) * 100)}%</>
+            ? <>TARGET: <b>{hoveredStream.label}</b> · GAIN {Math.round((vols[hoveredStream.key] ?? DEFAULT_VOL) * 150)}%</>
             : <>NO TARGET · AMBIENT MIX <span className="cursor-blink">▌</span></>}
         </span>
       </div>

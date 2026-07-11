@@ -13,8 +13,10 @@ to that stream's chat.
 - Embeds: Twitch Embed JS API, YouTube IFrame API, Kick plain iframe
 
 ## How the core mechanics work (don't "fix" these)
-- **Hover gain**: volume state lives in React (`vols`, 0–1). A post-render effect pushes
-  `min(1, vol * 1.5)` to the hovered player and the base level to the rest.
+- **Hover gain**: volume state lives in React (`vols`, 0–1). Embeds can't amplify past
+  their own max, so the mix reserves headroom: idle feeds play at `vol / 1.5` of player
+  range and hover uses the full range — a true, unclipped +50% at any slider level (UI
+  shows up to 150%). A post-render effect pushes this to every live player.
 - **Hover over iframes**: cross-origin iframes swallow mouse events, so each tile has a
   transparent `.shield` overlay that captures hover. Clicking the shield removes it until
   the mouse leaves the tile ("CLICK FOR PLAYER CONTROLS") so the native player UI stays usable.
