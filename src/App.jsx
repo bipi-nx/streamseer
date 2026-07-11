@@ -564,7 +564,7 @@ function computeLayout(streams, active) {
     const [a, b, c] = streams
     const heroHot = active === a.key
     const rightHot = active === b.key || active === c.key
-    const heroW = heroHot ? 76 : rightHot ? 44 : 62
+    const heroW = heroHot ? 70 : rightHot ? 42 : 55
     const rightW = 100 - heroW
     const bH = active === b.key ? 68 : active === c.key ? 32 : 50
     out.set(a.key, { l: 0, t: 0, w: heroW, h: 100 })
