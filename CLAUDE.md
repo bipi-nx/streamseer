@@ -21,8 +21,10 @@ to that stream's chat.
 - **Chat follows cursor**: chat iframes are created lazily on first hover and kept mounted
   (display:none) so switching back is instant.
 - **Layout**: `rowsFor(n)` maps feed count → row arrangement; exactly 3 feeds gets a
-  hero-left layout. Feeds start muted (browser autoplay policy) — unmute via the ON AIR/MUTED
-  button per tile.
+  hero-left layout.
+- **Default audio is ON**: every feed plays at its set level whether hovered or not; the
+  MUTED button is an opt-out. Players still *mount* muted (browser autoplay policy) and a
+  one-time pointerdown/keydown listener re-syncs audio after the first user gesture.
 - **Kick**: no volume/chat JS API — volume is controlled inside the player (tile shows
   "VOL IN PLAYER"); chat uses the popout URL, which Kick may block from framing.
 

@@ -552,9 +552,21 @@ export default function App() {
       if (!api) continue
       const base = vols[s.key] ?? DEFAULT_VOL
       api.setVol(hovered === s.key ? Math.min(1, base * 1.5) : base)
-      api.setMuted(muted[s.key] !== false)
+      api.setMuted(muted[s.key] === true)
     }
   })
+
+  /* players mount muted to satisfy autoplay policy; after the first user
+     gesture, re-run the audio sync so default-unmuted feeds go audible */
+  useEffect(() => {
+    const arm = () => setApiTick(t => t + 1)
+    window.addEventListener('pointerdown', arm, { once: true })
+    window.addEventListener('keydown', arm, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', arm)
+      window.removeEventListener('keydown', arm)
+    }
+  }, [])
 
   const onApi = useCallback((key, api) => {
     if (api) apis.current.set(key, api)
@@ -601,7 +613,7 @@ export default function App() {
   }, [])
   const onShieldClick = useCallback(key => setInteractive(key), [])
   const onVol = useCallback((key, v) => setVols(prev => ({ ...prev, [key]: v })), [])
-  const onMute = useCallback(key => setMuted(prev => ({ ...prev, [key]: prev[key] === false })), [])
+  const onMute = useCallback(key => setMuted(prev => ({ ...prev, [key]: !prev[key] })), [])
 
   /* build the wall */
   const n = streams.length
@@ -614,7 +626,7 @@ export default function App() {
     hovered: hovered === s.key,
     interactive: interactive === s.key,
     vol: vols[s.key] ?? DEFAULT_VOL,
-    muted: muted[s.key] !== false,
+    muted: muted[s.key] === true,
     onEnter, onLeave, onShieldClick, onVol, onMute, onKill, onApi, onTitle,
   })
 
