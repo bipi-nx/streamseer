@@ -174,6 +174,15 @@ header{
 .chatbtn:hover{border-color:var(--amber);color:var(--amber)}
 .chatbtn.on{border-color:var(--amber);color:var(--amber);background:#ffb52e12}
 
+/* chrome controls — bare icons, no chrome of their own */
+.barbtn{
+  display:flex;align-items:center;justify-content:center;flex:none;
+  background:transparent;border:none;color:var(--faint);
+  padding:4px;cursor:pointer;transition:color .15s;
+}
+.barbtn:hover{color:var(--dim)}
+.barbtn.on{color:var(--amber)}
+
 .authbtn{
   display:flex;align-items:center;gap:7px;
   background:transparent;border:1px solid var(--tw);color:var(--tw);
@@ -2004,10 +2013,9 @@ export default function App() {
           <button type="submit">+ ADD</button>
         </form>
         <div className="hd-right">
-          <span className="feedcount"><b>{String(n).padStart(2, '0')}</b>/{MAX_FEEDS}</span>
           {n > 0 && (
             <button
-              className="chatbtn"
+              className="barbtn"
               onClick={() => setChromeOff(v => !v)}
               title={barHidden ? 'Show the bar (h)' : 'Hide the bar (h)'}
               aria-label={barHidden ? 'Show the bar' : 'Hide the bar'}
@@ -2019,17 +2027,24 @@ export default function App() {
             </button>
           )}
           <button
-            className={'chatbtn' + (settingsOpen ? ' on' : '')}
+            className={'barbtn' + (settingsOpen ? ' on' : '')}
             onClick={() => setSettingsOpen(v => !v)}
             title="Settings"
             aria-label="Settings"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
-              stroke="currentColor" strokeWidth="1.3">
-              <circle cx="8" cy="8" r="2.3" />
-              <path d="M8 1v1.8M8 13.2V15M15 8h-1.8M2.8 8H1M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3M12.9 12.9l-1.3-1.3M4.4 4.4 3.1 3.1" />
+            {/* a cog: square teeth on a ring with a hollow hub — the hub is a
+                real hole (evenodd), not a disc painted in the bar's colour, so
+                it stays correct over the blurred peek background */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              {[0, 45, 90, 135, 180, 225, 270, 315].map(a => (
+                <rect key={a} x="10.6" y="1.6" width="2.8" height="4.6" rx=".6"
+                  transform={`rotate(${a} 12 12)`} />
+              ))}
+              <path fillRule="evenodd" clipRule="evenodd"
+                d="M12 4.6a7.4 7.4 0 1 0 0 14.8 7.4 7.4 0 0 0 0-14.8Zm0 4.3a3.1 3.1 0 1 1 0 6.2 3.1 3.1 0 0 1 0-6.2Z" />
             </svg>
           </button>
+          <span className="feedcount"><b>{String(n).padStart(2, '0')}</b>/{MAX_FEEDS}</span>
           {/* auth is per-platform and only offered for platforms actually on
               the wall — a twitch login is noise if you're only watching yt */}
           {TWITCH_CLIENT_ID && hasTwitch && (auth ? (
