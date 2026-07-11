@@ -38,6 +38,14 @@ unhover — and the chat panel swaps to that stream's chat.
   plus 7TV global + channel emotes (channel twitch-id resolved via api.ivr.fi, emote sets
   from 7tv.io/v3; zero-width emotes overlay the previous emote). YouTube/Kick chats remain
   plain iframes — 7TV has no presence there.
+- **Emote tab-completion**: the composer completes emote names Chatterino-style — Tab opens
+  a suggestion bubble over the input, Tab/shift-Tab and arrows cycle, Enter/click inserts,
+  Esc dismisses. The index merges 7TV (global + channel), Twitch natives via Helix (global +
+  channel + the logged-in user's own/sub emotes, needs `user:read:emotes`), and a `:name:`
+  emoji set. Same index renders messages, so your own sent messages show emotes too.
+- **Control-strip affordance**: hovering the bottom 10% of a tile raises a translucent curved
+  shelf. `.tile-body` must keep `overflow:hidden` — the curve is drawn wider than the tile and
+  will bleed onto the neighbouring feed without it.
 - **Twitch login is optional**: `VITE_TWITCH_CLIENT_ID` (in `.env`, committed — implicit
   OAuth has no secret, the ID is public). CONNECT TWITCH runs the implicit flow, the token
   lands in the URL fragment, is validated against id.twitch.tv/oauth2/validate, and is kept

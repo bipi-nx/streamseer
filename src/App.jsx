@@ -129,17 +129,58 @@ header{
 .authbtn.on:hover{background:#ff44381a;border-color:var(--red);color:var(--red)}
 .authbtn .av{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
 
-.composer{flex:none;display:flex;gap:6px;padding:7px;border-top:1px solid var(--line);
-  background:var(--panel2)}
+.composer{flex:none;position:relative;display:flex;gap:6px;padding:7px;
+  border-top:1px solid var(--line);background:var(--panel2)}
+
+/* ---------- emote tab-completion bubble ---------- */
+.sugg{
+  position:absolute;left:7px;right:7px;bottom:calc(100% + 6px);z-index:20;
+  background:#0a0d13f2;border:1px solid var(--tw);
+  box-shadow:0 10px 34px #000d, 0 0 22px #a970ff22;
+  backdrop-filter:blur(4px);
+  animation:suggIn .13s ease both;
+}
+@keyframes suggIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.sugg::after{ /* little pointer down at the text */
+  content:'';position:absolute;left:14px;bottom:-5px;width:8px;height:8px;
+  background:#0a0d13;border-right:1px solid var(--tw);border-bottom:1px solid var(--tw);
+  transform:rotate(45deg);
+}
+.sugg-list{max-height:216px;overflow-y:auto;scrollbar-width:thin;
+  scrollbar-color:#33405494 transparent}
+.sugg-list::-webkit-scrollbar{width:6px}
+.sugg-list::-webkit-scrollbar-thumb{background:var(--line)}
+.sugg-row{
+  width:100%;display:flex;align-items:center;gap:9px;padding:5px 8px;
+  background:transparent;border:none;border-left:2px solid transparent;cursor:pointer;
+  font-family:var(--mono);text-align:left;
+}
+.sugg-row.on{background:#a970ff1f;border-left-color:var(--tw)}
+.sugg-img{flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center}
+.sugg-img img{max-width:30px;max-height:30px;object-fit:contain}
+.sugg-emoji{font-size:20px;line-height:1}
+.sugg-name{flex:1;min-width:0;font-size:12px;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sugg-row.on .sugg-name{color:#fff}
+.sugg-src{flex:none;font-size:8px;letter-spacing:.12em;text-transform:uppercase;
+  padding:1px 4px;border:1px solid currentColor;opacity:.75}
+.src-7tv{color:#29d8a4} .src-twitch{color:var(--tw)}
+.src-channel{color:var(--amber)} .src-sub{color:#ff8ab5} .src-emoji{color:var(--dim)}
+.sugg-foot{
+  border-top:1px solid var(--line);padding:4px 8px;
+  font-size:8px;letter-spacing:.14em;color:var(--faint);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
 .composer input{
   flex:1;min-width:0;background:#080a0e;border:1px solid var(--line);color:var(--text);
   font-family:var(--mono);font-size:11px;padding:7px 9px;outline:none;transition:border-color .15s}
 .composer input:focus{border-color:var(--tw)}
 .composer input::placeholder{color:var(--faint)}
-.composer button{
+/* scoped to the send button — .sugg-row is also a button inside .composer */
+.composer > button[type=submit]{
   flex:none;background:var(--tw);color:#0d0616;border:none;cursor:pointer;
   font-size:11px;padding:0 12px;transition:opacity .15s}
-.composer button:disabled{opacity:.3;cursor:default}
+.composer > button[type=submit]:disabled{opacity:.3;cursor:default}
 .msg.mine{background:#a970ff12;margin:0 -10px;padding:0 10px;
   box-shadow:inset 2px 0 0 var(--tw)}
 
@@ -187,14 +228,6 @@ main{flex:1;display:flex;min-height:0}
 .tile.hov .tile-name{color:var(--amber)}
 .tile-ctl{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
 
-.mutebtn{
-  background:transparent;border:1px solid #ff443855;cursor:pointer;
-  font-family:var(--mono);font-size:9px;letter-spacing:.14em;padding:3px 7px;
-  color:var(--red);transition:all .15s;white-space:nowrap;
-}
-.mutebtn.onair{color:var(--green);border-color:#58e07c55}
-.mutebtn:hover{border-color:currentColor}
-
 .vol{appearance:none;-webkit-appearance:none;width:74px;height:2px;background:var(--line2);outline:none;cursor:pointer}
 .vol::-webkit-slider-thumb{
   appearance:none;-webkit-appearance:none;width:9px;height:14px;background:var(--amber);
@@ -211,7 +244,9 @@ main{flex:1;display:flex;min-height:0}
 }
 .killbtn:hover{color:var(--red)}
 
-.tile-body{flex:1;position:relative;min-height:0;background:#000}
+/* overflow:hidden clips the control-strip curve to this tile — without it the
+   curve is drawn wider than the tile and bleeds over the neighbouring feed */
+.tile-body{flex:1;position:relative;min-height:0;background:#000;overflow:hidden}
 .tile-body .mount{position:absolute;inset:0}
 .tile-body .mount iframe{width:100%;height:100%;border:0;display:block}
 
@@ -220,30 +255,25 @@ main{flex:1;display:flex;min-height:0}
    native player controls underneath become clickable */
 .shield{position:absolute;inset:0 0 10% 0;z-index:5;cursor:pointer}
 .shield-ctl{position:absolute;left:0;right:0;bottom:0;height:10%;z-index:5;cursor:pointer}
-.hint{
-  position:absolute;right:8px;bottom:calc(10% + 8px);z-index:6;
-  font-size:9px;letter-spacing:.16em;pointer-events:none;
-  color:#ffffff70;background:#000000a8;border:1px solid #ffffff22;padding:3px 7px;
-  opacity:0;transition:opacity .2s;
+
+/* hovering the control strip surfaces a curved shelf + hairline, hinting
+   that the player's own controls live underneath */
+.shield-ctl::before{
+  content:'';position:absolute;left:-8%;right:-8%;bottom:0;height:230%;
+  border-radius:50% 50% 0 0 / 30px 30px 0 0;
+  background:
+    linear-gradient(180deg, transparent 30%, #ffb52e1f 62%, #ffb52e2e),
+    linear-gradient(180deg, transparent 22%, #000000c4 60%, #000000e8);
+  border-top:1px solid #ffb52e5c;
+  backdrop-filter:blur(2px);
+  opacity:0;transform:translateY(72%);
+  transition:opacity .26s ease, transform .4s cubic-bezier(.22,.9,.28,1);
+  pointer-events:none;
 }
-.tile.hov .hint{opacity:1}
-.lockbadge{
-  position:absolute;left:8px;top:8px;z-index:7;pointer-events:none;
-  font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:#141005;
-  background:var(--green);padding:3px 8px;font-weight:600;
-}
+.shield-ctl:hover::before{opacity:1;transform:translateY(50%)}
 .tile.locked{border-color:var(--green);box-shadow:0 0 0 1px #58e07c55, 0 0 34px #58e07c1f}
 .tile.locked .tile-name{color:var(--green)}
 .tile.locked .corner{opacity:1;border-color:var(--green)}
-.tile.locked .gainbadge{background:var(--green)}
-.gainbadge{
-  position:absolute;left:8px;top:8px;z-index:6;pointer-events:none;
-  font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:#141005;
-  background:var(--amber);padding:3px 8px;font-weight:600;
-  opacity:0;transform:translateY(-4px);transition:all .18s;
-}
-.tile.hov .gainbadge{opacity:1;transform:none}
-
 /* corner brackets on hover */
 .corner{position:absolute;width:14px;height:14px;z-index:6;pointer-events:none;
   opacity:0;transition:opacity .18s}
@@ -333,20 +363,6 @@ main{flex:1;display:flex;min-height:0}
   cursor:pointer;transition:all .15s;
 }
 .chips button:hover{border-color:var(--amber);color:var(--amber);background:#ffb52e0d}
-
-/* ---------- status bar ---------- */
-.statusbar{
-  flex:none;height:26px;display:flex;align-items:center;gap:18px;padding:0 14px;
-  border-top:1px solid var(--line);background:var(--panel);
-  font-size:9px;letter-spacing:.18em;color:var(--faint);
-}
-.statusbar .dot{width:6px;height:6px;background:var(--green);border-radius:50%;
-  animation:pulse 1.6s ease-in-out infinite;flex:none}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
-.statusbar .target{margin-left:auto;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.statusbar .target b{color:var(--amber);font-weight:600}
-.cursor-blink{animation:blink 1.1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
 
 /* ---------- toast ---------- */
 .toast{
@@ -548,31 +564,106 @@ function nickColor(tags, login) {
   return NICK_COLORS[h % NICK_COLORS.length]
 }
 
-/* 7tv: global set + channel set (channel looked up by twitch user id via ivr.fi) */
-async function fetch7tv(channel) {
-  const map = new Map()
+/* ---------- emote index: 7tv + twitch natives + emoji ----------
+   one Map<name, {url|char, zw, src}> feeding both message rendering and
+   tab-completion. src labels the provider in the completion bubble. */
+
+/* a compact emoji set keyed the way chat clients key them (:name:) */
+const EMOJI = {
+  smile: '😄', grin: '😁', joy: '😂', rofl: '🤣', sob: '😭', cry: '😢',
+  heart: '❤️', fire: '🔥', skull: '💀', clown: '🤡', eyes: '👀', brain: '🧠',
+  ok: '👌', pray: '🙏', clap: '👏', wave: '👋', muscle: '💪', point_up: '☝️',
+  thumbsup: '👍', thumbsdown: '👎', poop: '💩', ghost: '👻', alien: '👽',
+  robot: '🤖', cat: '🐱', dog: '🐶', monkey: '🐵', frog: '🐸', snake: '🐍',
+  pizza: '🍕', burger: '🍔', beer: '🍺', coffee: '☕', cake: '🎂', popcorn: '🍿',
+  rocket: '🚀', star: '⭐', sparkles: '✨', zap: '⚡', boom: '💥', tada: '🎉',
+  trophy: '🏆', crown: '👑', money: '💰', gem: '💎', bulb: '💡', bell: '🔔',
+  check: '✅', x: '❌', warning: '⚠️', question: '❓', exclamation: '❗',
+  hundred: '💯', eggplant: '🍆', peach: '🍑', snowflake: '❄️', sun: '☀️',
+  moon: '🌙', wave_hand: '🌊', sleep: '😴', thinking: '🤔', shrug: '🤷',
+  facepalm: '🤦', sunglasses: '😎', wink: '😉', kiss: '😘', angry: '😠',
+  rage: '😡', scream: '😱', nauseated: '🤢', sick: '🤒', party: '🥳',
+  salute: '🫡', melting: '🫠', pleading: '🥺', cold: '🥶', hot: '🥵',
+}
+
+function emojiEntries() {
+  return Object.entries(EMOJI).map(([name, char]) => [`:${name}:`, { char, src: 'emoji' }])
+}
+
+/* 7tv: global set + the channel's set (channel resolved by twitch user id) */
+async function fetch7tv(channelId) {
+  const out = []
   const add = list => {
     for (const e of list || []) {
       const base = e.data && e.data.host && e.data.host.url
-      map.set(e.name, {
+      out.push([e.name, {
         url: base ? `https:${base}/2x.webp` : `https://cdn.7tv.app/emote/${e.id}/2x.webp`,
         zw: !!((e.flags & 1) || (e.data && e.data.flags & 256)),
-      })
+        src: '7tv',
+      }])
     }
   }
   try {
     const g = await (await fetch('https://7tv.io/v3/emote-sets/global')).json()
     add(g.emotes)
   } catch { /* no globals — chat still works */ }
+  if (channelId) {
+    try {
+      const s = await (await fetch(`https://7tv.io/v3/users/twitch/${channelId}`)).json()
+      add(s.emote_set && s.emote_set.emotes)
+    } catch { /* channel has no 7tv set */ }
+  }
+  return out
+}
+
+/* twitch's own emotes via Helix — needs a user token, which we only have
+   when logged in (and that's also the only time you can type, so it lines up).
+   global + this channel's emotes + the ones the logged-in user owns. */
+async function fetchTwitchEmotes(channelId, auth) {
+  if (!auth) return []
+  const head = { 'Client-Id': TWITCH_CLIENT_ID, Authorization: 'Bearer ' + auth.token }
+  const get = async url => {
+    try {
+      const r = await fetch(url, { headers: head })
+      if (!r.ok) return []
+      const d = await r.json()
+      return d.data || []
+    } catch { return [] }
+  }
+  const [glob, chan, mine] = await Promise.all([
+    get('https://api.twitch.tv/helix/chat/emotes/global'),
+    channelId ? get('https://api.twitch.tv/helix/chat/emotes?broadcaster_id=' + channelId) : [],
+    get('https://api.twitch.tv/helix/chat/emotes/user?user_id=' + auth.userId),
+  ])
+  const pick = e =>
+    (e.images && (e.images.url_2x || e.images.url_1x)) || TW_EMOTE_CDN(e.id)
+  return [
+    ...glob.map(e => [e.name, { url: pick(e), zw: false, src: 'twitch' }]),
+    ...chan.map(e => [e.name, { url: pick(e), zw: false, src: 'channel' }]),
+    ...mine.map(e => [e.name, { url: pick(e), zw: false, src: 'sub' }]),
+  ]
+}
+
+async function resolveChannelId(channel) {
   try {
     const u = await (await fetch(`https://api.ivr.fi/v2/twitch/user?login=${encodeURIComponent(channel)}`)).json()
-    const id = Array.isArray(u) && u[0] && u[0].id
-    if (id) {
-      const s = await (await fetch(`https://7tv.io/v3/users/twitch/${id}`)).json()
-      add(s.emote_set && s.emote_set.emotes)
-    }
-  } catch { /* channel has no 7tv set */ }
-  return map
+    return (Array.isArray(u) && u[0] && u[0].id) || null
+  } catch { return null }
+}
+
+/* rank completions: prefix matches first, then substring; shorter names win */
+function completionsFor(word, index) {
+  if (!word) return []
+  const w = word.toLowerCase()
+  const pre = []
+  const sub = []
+  for (const [name, e] of index) {
+    const n = name.toLowerCase()
+    if (n.startsWith(w)) pre.push([name, e])
+    else if (w.length >= 2 && n.includes(w)) sub.push([name, e])
+  }
+  const bylen = (a, b) => a[0].length - b[0].length || a[0].localeCompare(b[0])
+  return [...pre.sort(bylen), ...sub.sort(bylen)].slice(0, 10)
 }
 
 /* twitch "emotes" tag gives codepoint ranges — slice on codepoints, not utf-16 */
@@ -611,7 +702,9 @@ function MsgBody({ text, emotesTag, emoteMap }) {
       for (const w of seg.s.split(/(\s+)/)) {
         if (!w) continue
         const e = /\S/.test(w) ? emoteMap.get(w) : null
-        pieces.push(e ? { url: e.url, name: w, zw: e.zw, overlays: [] } : w)
+        if (!e) { pieces.push(w); continue }
+        if (e.char) { pieces.push(e.char); continue }   // emoji → plain glyph
+        pieces.push({ url: e.url, name: w, zw: e.zw, overlays: [] })
       }
     }
   }
@@ -640,7 +733,7 @@ function MsgBody({ text, emotesTag, emoteMap }) {
 }
 
 /* ---------- twitch oauth (implicit flow — no backend, no secret) ---------- */
-const SCOPES = 'chat:read chat:edit'
+const SCOPES = 'chat:read chat:edit user:read:emotes'
 
 /* twitch matches this literally against the app's registered redirect urls —
    it must be byte-identical to one of them, trailing slash and all */
@@ -720,16 +813,26 @@ function TwitchChat({ channel, visible, auth }) {
   const [emoteMap, setEmoteMap] = useState(() => new Map())
   const [status, setStatus] = useState('sync')
   const [draft, setDraft] = useState('')
+  const [sugg, setSugg] = useState(null)   // {items, idx, from, to} — tab-completion
   const scrollRef = useRef(null)
   const sockRef = useRef(null)
+  const inputRef = useRef(null)
   const pinned = useRef(true)
   const nextId = useRef(0)
 
   useEffect(() => {
     let dead = false
-    fetch7tv(channel).then(m => { if (!dead) setEmoteMap(m) })
+    ;(async () => {
+      const id = await resolveChannelId(channel)
+      if (dead) return
+      const [stv, tw] = await Promise.all([fetch7tv(id), fetchTwitchEmotes(id, auth)])
+      if (dead) return
+      /* later entries win: channel/sub emotes override globals, 7tv overrides
+         twitch on name clashes (matching what chat clients actually render) */
+      setEmoteMap(new Map([...emojiEntries(), ...tw, ...stv]))
+    })()
     return () => { dead = true }
-  }, [channel])
+  }, [channel, auth])
 
   useEffect(() => {
     let retry = null
@@ -785,8 +888,76 @@ function TwitchChat({ channel, visible, auth }) {
     }
   }, [channel, auth])
 
+  /* ---- tab-completion (chatterino / 7tv style) ----
+     the word under the caret is the search term; Tab opens the bubble and
+     cycles through matches, arrows move, Enter/Tab accept, Esc dismisses */
+  const wordAtCaret = () => {
+    const el = inputRef.current
+    const caret = el ? el.selectionStart : draft.length
+    const from = draft.lastIndexOf(' ', caret - 1) + 1
+    return { word: draft.slice(from, caret), from, to: caret }
+  }
+
+  const accept = item => {
+    const [name, e] = item
+    const insert = e.char || name
+    const next = draft.slice(0, sugg.from) + insert + ' ' + draft.slice(sugg.to)
+    setDraft(next)
+    setSugg(null)
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (el) {
+        const pos = sugg.from + insert.length + 1
+        el.focus()
+        el.setSelectionRange(pos, pos)
+      }
+    })
+  }
+
+  const onKeyDown = e => {
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      if (sugg && sugg.items.length) {
+        // cycle: shift+tab walks backwards
+        const step = e.shiftKey ? -1 : 1
+        const idx = (sugg.idx + step + sugg.items.length) % sugg.items.length
+        setSugg({ ...sugg, idx })
+        return
+      }
+      const { word, from, to } = wordAtCaret()
+      const items = completionsFor(word, emoteMap)
+      if (items.length) setSugg({ items, idx: 0, from, to })
+      return
+    }
+    if (!sugg) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      setSugg({ ...sugg, idx: (sugg.idx + step + sugg.items.length) % sugg.items.length })
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      accept(sugg.items[sugg.idx])
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setSugg(null)
+    }
+  }
+
+  /* keep the bubble in sync while typing continues after it opened */
+  const onDraft = v => {
+    setDraft(v)
+    if (!sugg) return
+    const el = inputRef.current
+    const caret = el ? el.selectionStart : v.length
+    const from = v.lastIndexOf(' ', caret - 1) + 1
+    const word = v.slice(from, caret)
+    const items = completionsFor(word, emoteMap)
+    setSugg(items.length ? { items, idx: 0, from, to: caret } : null)
+  }
+
   const send = e => {
     e.preventDefault()
+    if (sugg) { accept(sugg.items[sugg.idx]); return }   // Enter accepts, doesn't send
     const text = draft.trim()
     const ws = sockRef.current
     if (!text || !auth || !ws || ws.readyState !== WebSocket.OPEN) return
@@ -837,12 +1008,38 @@ function TwitchChat({ channel, visible, auth }) {
       </div>
       {auth && (
         <form className="composer" onSubmit={send}>
+          {sugg && (
+            <div className="sugg">
+              <div className="sugg-list">
+                {sugg.items.map(([name, e], i) => (
+                  <button
+                    type="button"
+                    key={name + i}
+                    className={'sugg-row' + (i === sugg.idx ? ' on' : '')}
+                    onMouseDown={ev => { ev.preventDefault(); accept([name, e]) }}
+                    onMouseEnter={() => setSugg(s => ({ ...s, idx: i }))}
+                  >
+                    <span className="sugg-img">
+                      {e.char ? <span className="sugg-emoji">{e.char}</span> : <img src={e.url} alt="" />}
+                    </span>
+                    <span className="sugg-name">{name}</span>
+                    <span className={'sugg-src src-' + e.src}>{e.src}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="sugg-foot">TAB / ↑↓ CYCLE · ENTER INSERT · ESC CLOSE</div>
+            </div>
+          )}
           <input
+            ref={inputRef}
             value={draft}
-            onChange={e => setDraft(e.target.value)}
+            onChange={e => onDraft(e.target.value)}
+            onKeyDown={onKeyDown}
+            onBlur={() => setSugg(null)}
             maxLength={480}
-            placeholder={`send as ${auth.login}…`}
+            placeholder={`send as ${auth.login}…  (tab = emotes)`}
             spellCheck="false"
+            autoComplete="off"
           />
           <button type="submit" disabled={!draft.trim()}>▶</button>
         </form>
@@ -851,7 +1048,6 @@ function TwitchChat({ channel, visible, auth }) {
         <span className={'st-' + status}>
           {status === 'live' ? '● IRC LIVE' : status === 'sync' ? '◌ SYNCING' : '○ RECONNECTING'}
         </span>
-        <span>{auth ? auth.login.toUpperCase() : 'ANON · READ-ONLY'}</span>
         <span className="stv">7TV ×{emoteMap.size}</span>
       </div>
     </div>
@@ -862,7 +1058,7 @@ const PLAT_TAG = { twitch: 'TTV', youtube: 'YT', kick: 'KICK' }
 
 /* ---------- tile ---------- */
 function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero,
-  onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle }) {
+  onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle }) {
   const shownPct = Math.round(vol * (hovered ? 150 : 100))
   const hasVolApi = stream.platform !== 'kick'
   const apiCb = useCallback(api => onApi(stream.key, api), [onApi, stream.key])
@@ -881,11 +1077,6 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero,
         <div className="tile-ctl">
           {hasVolApi ? (
             <>
-              <button
-                className={'mutebtn' + (muted ? '' : ' onair')}
-                onClick={() => onMute(stream.key)}
-                title={muted ? 'Unmute feed' : 'Mute feed'}
-              >{muted ? 'MUTED' : 'ON AIR'}</button>
               <input
                 className="vol" type="range" min="0" max="100" value={Math.round(vol * 100)}
                 onChange={e => onVol(stream.key, Number(e.target.value) / 100)}
@@ -903,15 +1094,11 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, hero,
         {stream.platform === 'twitch' && <TwitchMount id={stream.id} onApi={apiCb} />}
         {stream.platform === 'youtube' && <YouTubeMount id={stream.id} onApi={apiCb} onTitle={titleCb} />}
         {stream.platform === 'kick' && <KickMount id={stream.id} />}
-        {locked ? <span className="lockbadge">◉ LOCKED</span> : <span className="gainbadge">▲ GAIN +50%</span>}
         <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
         {!interactive && (
           <>
             <div className="shield" onClick={() => onLock(stream.key)} />
             <div className="shield-ctl" onClick={() => onControls(stream.key)} />
-            <span className="hint">
-              {locked ? 'CLICK TO UNLOCK · BOTTOM EDGE = CONTROLS' : 'CLICK TO LOCK · BOTTOM EDGE = CONTROLS'}
-            </span>
           </>
         )}
       </div>
@@ -1087,11 +1274,9 @@ export default function App() {
   }, [])
   const onControls = useCallback(key => setInteractive(key), [])
   const onVol = useCallback((key, v) => setVols(prev => ({ ...prev, [key]: v })), [])
-  const onMute = useCallback(key => setMuted(prev => ({ ...prev, [key]: !prev[key] })), [])
 
   /* build the wall */
   const n = streams.length
-  const activeStream = streams.find(s => s.key === active)
   const chatStream = streams.find(s => s.key === activeChat)
   const chatFeeds = streams.filter(s => chatLoaded.current.has(s.key))
 
@@ -1102,7 +1287,7 @@ export default function App() {
     interactive: interactive === s.key,
     vol: vols[s.key] ?? DEFAULT_VOL,
     muted: muted[s.key] === true,
-    onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle,
+    onEnter, onLeave, onLock, onControls, onVol, onKill, onApi, onTitle,
   })
 
   let wall
@@ -1114,7 +1299,7 @@ export default function App() {
         <div className="how">
           <div><b>01 · PATCH IN</b>paste any twitch, youtube<br />or kick stream link above</div>
           <div><b>02 · AUTO WALL</b>the grid re-organizes itself<br />around how many feeds are up</div>
-          <div><b>03 · SEEK BY EAR</b>hover to solo at +50% gain<br />click to lock it there</div>
+          <div><b>03 · SEEK BY EAR</b>hover to solo at +50% gain<br />click to lock · bottom edge = controls</div>
         </div>
         <div className="try">NO SIGNAL — TRY A 24/7 FEED</div>
         <div className="chips">
@@ -1176,7 +1361,7 @@ export default function App() {
           <button type="submit">+ ADD</button>
         </form>
         <div className="hd-right">
-          <span className="feedcount">FEEDS <b>{String(n).padStart(2, '0')}</b>/{MAX_FEEDS}</span>
+          <span className="feedcount"><b>{String(n).padStart(2, '0')}</b>/{MAX_FEEDS}</span>
           {TWITCH_CLIENT_ID && (auth ? (
             <button className="authbtn on" onClick={logout} title="Disconnect from Twitch">
               <i className="av" />{auth.login}
@@ -1186,8 +1371,28 @@ export default function App() {
               CONNECT TWITCH
             </button>
           ))}
-          <button className={'chatbtn' + (chatOpen ? ' on' : '')} onClick={() => setChatOpen(o => !o)}>
-            CHAT {chatOpen ? '◨' : '◧'}
+          <button
+            className={'chatbtn' + (chatOpen ? ' on' : '')}
+            onClick={() => setChatOpen(o => !o)}
+            title={chatOpen ? 'Hide chat' : 'Show chat'}
+            aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
+          >
+            {/* arrow into a wall: |→ collapses the panel, ←| reopens it */}
+            <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+              {chatOpen ? (
+                <g stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="square">
+                  <path d="M2 1.5v9" />
+                  <path d="M6 6h11" />
+                  <path d="M13.5 2.5 17 6l-3.5 3.5" />
+                </g>
+              ) : (
+                <g stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="square">
+                  <path d="M18 1.5v9" />
+                  <path d="M14 6H3" />
+                  <path d="M6.5 2.5 3 6l3.5 3.5" />
+                </g>
+              )}
+            </svg>
           </button>
         </div>
       </header>
@@ -1228,17 +1433,6 @@ export default function App() {
           </aside>
         )}
       </main>
-
-      <div className="statusbar">
-        <span className="dot" />
-        <span>SIGNAL OK</span>
-        <span>HOVER = SOLO · CLICK = LOCK · BOTTOM EDGE = CONTROLS</span>
-        <span className="target">
-          {activeStream
-            ? <>{locked ? 'LOCKED' : 'TARGET'}: <b>{activeStream.label}</b> · GAIN {Math.round((vols[activeStream.key] ?? DEFAULT_VOL) * 150)}%</>
-            : <>NO TARGET · AMBIENT MIX <span className="cursor-blink">▌</span></>}
-        </span>
-      </div>
 
       {toast && <div className="toast">{toast}</div>}
     </div>
