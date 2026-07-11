@@ -11,6 +11,7 @@ const MAX_FEEDS = 12
 const DEFAULT_VOL = 0.5
 const STORE_KEY = 'streamseer:v1'
 const AUTH_KEY = 'streamseer:auth'
+const CHROME_KEY = 'streamseer:chrome'
 const MAX_MSGS = 150     // twitch's own scrollback depth
 const FLUSH_MS = 120     // commit incoming chat in batches, not per-message
 
@@ -76,7 +77,7 @@ body::after{ /* scanlines */
   50%{transform:translate(22px,-26px)} 75%{transform:translate(-14px,-8px)} 100%{transform:translate(0,0)}
 }
 
-.app{height:100%;display:flex;flex-direction:column}
+.app{height:100%;display:flex;flex-direction:column;position:relative}
 
 /* ---------- header ---------- */
 header{
@@ -84,6 +85,32 @@ header{
   padding:0 16px;border-bottom:1px solid var(--line);
   background:linear-gradient(180deg,var(--panel2),var(--panel));
 }
+
+/* Chrome hidden: the header leaves the flow entirely (so the wall claims the
+   full height) and overlays on demand — nudging the cursor to the top edge
+   peeks it back, like a video player. On a lobby TV with no cursor it simply
+   stays gone. */
+.app.chrome-off > header{
+  position:absolute;top:0;left:0;right:0;z-index:70;
+  transform:translateY(-100%);opacity:0;pointer-events:none;
+  transition:transform .32s cubic-bezier(.22,.9,.28,1), opacity .22s ease;
+  background:linear-gradient(180deg,#11151df2,#0c0f14f2);
+  backdrop-filter:blur(6px);
+}
+.app.chrome-off.peek > header{
+  transform:none;opacity:1;pointer-events:auto;
+  box-shadow:0 12px 34px #000a;
+}
+/* the strip you aim at to bring it back */
+.peekzone{
+  position:absolute;top:0;left:0;right:0;height:10px;z-index:69;
+}
+.peekzone::after{
+  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:52px;height:3px;background:var(--amber);opacity:0;
+  transition:opacity .2s ease;
+}
+.peekzone:hover::after{opacity:.55}
 .brand{display:flex;align-items:center;gap:12px;user-select:none}
 .brand-bars{display:flex;align-items:flex-end;gap:2px;height:20px}
 .brand-bars i{width:3px;background:var(--amber);animation:bar 1.1s ease-in-out infinite;transform-origin:bottom}
@@ -1479,6 +1506,11 @@ export default function App() {
   const [activeChat, setActiveChat] = useState(null)
   const [interactive, setInteractive] = useState(null)
   const [chatOpen, setChatOpen] = useState(true)
+  /* persisted so a lobby screen stays clean across reloads */
+  const [chromeOff, setChromeOff] = useState(() => {
+    try { return localStorage.getItem(CHROME_KEY) === '1' } catch { return false }
+  })
+  const [peek, setPeek] = useState(false)
   const [input, setInput] = useState('')
   const [toast, setToast] = useState(null)
   const [auth, setAuth] = useState(loadAuth)
@@ -1526,6 +1558,13 @@ export default function App() {
         onFullscreen(fullscreen)
         return
       }
+      /* no-op on an empty wall — otherwise it silently arms the hidden state
+         and the bar disappears as soon as the first feed is added */
+      if (e.key.toLowerCase() === 'h' && streams.length) {
+        e.preventDefault()
+        setChromeOff(v => !v)
+        return
+      }
       if (!active) return
 
       const k = e.key.toLowerCase()
@@ -1543,7 +1582,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [active, fullscreen, onFullscreen])
+  }, [active, fullscreen, onFullscreen, streams.length])
 
   /* toast helper — declared before the effects below that depend on it */
   const toastTimer = useRef(null)
@@ -1557,6 +1596,22 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORE_KEY, JSON.stringify({ streams, vols, muted }))
   }, [streams, vols, muted])
+
+  useEffect(() => {
+    localStorage.setItem(CHROME_KEY, chromeOff ? '1' : '0')
+  }, [chromeOff])
+
+  /* peek the hidden bar when the cursor reaches the top edge; drop it again
+     once the cursor moves well clear, so it can't sit half-open */
+  useEffect(() => {
+    if (!chromeOff) { setPeek(false); return }
+    const onMove = e => {
+      if (e.clientY <= 12) setPeek(true)
+      else if (e.clientY > 76) setPeek(false)
+    }
+    window.addEventListener('pointermove', onMove)
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [chromeOff])
 
   /* auth: absorb the oauth redirect, then keep the stored token verified.
      twitch tokens expire (~60d) and can be revoked — drop a dead one. */
@@ -1789,10 +1844,15 @@ export default function App() {
     )
   }
 
+  /* an empty wall always keeps its bar — hiding it would strand the user with
+     no way to add a feed */
+  const barHidden = chromeOff && n > 0
+
   return (
-    <div className="app">
+    <div className={'app' + (barHidden ? ' chrome-off' : '') + (barHidden && peek ? ' peek' : '')}>
       <style>{css}</style>
       <div className="grain" />
+      {barHidden && <div className="peekzone" onMouseEnter={() => setPeek(true)} />}
       <header>
         <div className="brand">
           <div className="brand-bars"><i /><i /><i /><i /><i /></div>
@@ -1827,6 +1887,22 @@ export default function App() {
               CONNECT TWITCH
             </button>
           ))}
+          {n > 0 && (
+            <button
+              className="chatbtn"
+              onClick={() => setChromeOff(v => !v)}
+              title={chromeOff ? 'Pin the bar (h)' : 'Hide the bar (h)'}
+              aria-label={chromeOff ? 'Pin the bar' : 'Hide the bar'}
+            >
+              <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+                <g stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="square">
+                  {chromeOff
+                    ? <><path d="M2 10.5h16" /><path d="M10 8.5V2" /><path d="M6.5 5.5 10 2l3.5 3.5" /></>
+                    : <><path d="M2 1.5h16" /><path d="M10 3.5V10" /><path d="M6.5 6.5 10 10l3.5-3.5" /></>}
+                </g>
+              </svg>
+            </button>
+          )}
           <button
             className={'chatbtn' + (chatOpen ? ' on' : '')}
             onClick={() => setChatOpen(o => !o)}
