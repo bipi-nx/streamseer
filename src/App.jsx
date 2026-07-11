@@ -259,8 +259,7 @@ main{flex:1;display:flex;min-height:0}
 }
 .fsbtn:hover,.iconbtn:hover{color:var(--dim)}
 .fsbtn.on{color:var(--dim)}
-.iconbtn.muted{color:var(--red);opacity:.75}
-.iconbtn.muted:hover{opacity:1;color:var(--red)}
+/* muted reads through the icon glyph alone — no colour change */
 
 /* fullscreen deck: single tile, no entrance stagger (FLIP drives the motion) */
 .fsdeck .tile{animation:none}
@@ -1405,7 +1404,7 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, h
               />
               <span className={'volpct' + (hovered && !muted ? ' boost' : '')}>{shownPct}%</span>
               <button
-                className={'iconbtn' + (muted ? ' muted' : '')}
+                className="iconbtn"
                 onClick={() => onMute(stream.key)}
                 title={muted ? 'Unmute (m)' : 'Mute (m)'}
                 aria-label={muted ? 'Unmute' : 'Mute'}
@@ -1731,7 +1730,9 @@ export default function App() {
     interactive: interactive === s.key,
     fullscreen: fullscreen === s.key,
     vol: vols[s.key] ?? DEFAULT_VOL,
-    muted: muted[s.key] === true,
+    /* what the feed is ACTUALLY doing — its own mute, or silenced because
+       another feed holds the lock. the icon must show the truth either way. */
+    muted: muted[s.key] === true || (locked !== null && locked !== s.key),
     onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive,
   })
 
