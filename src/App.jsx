@@ -172,7 +172,7 @@ main{flex:1;display:flex;min-height:0}
 
 .tile-top{
   flex:none;height:34px;display:flex;align-items:center;gap:8px;padding:0 8px;
-  background:var(--panel2);border-bottom:1px solid var(--line);
+  background:var(--panel2);border-bottom:1px solid var(--line);overflow:hidden;
 }
 .plat{
   flex:none;font-size:9px;font-weight:600;letter-spacing:.12em;padding:2px 5px;
@@ -927,6 +927,14 @@ export default function App() {
   /* a locked feed stays the active one no matter where the cursor goes */
   const active = locked || hovered
 
+  /* toast helper — declared before the effects below that depend on it */
+  const toastTimer = useRef(null)
+  const say = useCallback(msg => {
+    setToast(msg)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 2600)
+  }, [])
+
   /* persist */
   useEffect(() => {
     localStorage.setItem(STORE_KEY, JSON.stringify({ streams, vols, muted }))
@@ -963,14 +971,6 @@ export default function App() {
     localStorage.removeItem(AUTH_KEY)
     say('DISCONNECTED FROM TWITCH')
   }, [say])
-
-  /* toast helper */
-  const toastTimer = useRef(null)
-  const say = useCallback(msg => {
-    setToast(msg)
-    clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), 2600)
-  }, [])
 
   /* push audio state to every live player (runs after every render —
      also catches players that finish loading late).
