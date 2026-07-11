@@ -291,12 +291,40 @@ main{flex:1;display:flex;min-height:0}
 .tile.hov .tile-name{color:var(--amber)}
 .tile-ctl{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
 
-.vol{appearance:none;-webkit-appearance:none;width:74px;height:2px;background:var(--line2);outline:none;cursor:pointer}
-.vol::-webkit-slider-thumb{
-  appearance:none;-webkit-appearance:none;width:9px;height:14px;background:var(--amber);
-  border:none;cursor:pointer;
+/* The track stays a hairline, but the INPUT is tall and transparent so there's
+   a real grab zone — a 2px-tall input is a 2px-tall hit target, which is why
+   these needed razor precision. The track is drawn on the pseudo-element. */
+.vol,.set-ctl input[type=range]{
+  appearance:none;-webkit-appearance:none;
+  height:20px;background:transparent;outline:none;cursor:pointer;
+  padding:0;margin:0;
 }
-.vol::-moz-range-thumb{width:9px;height:14px;background:var(--amber);border:none;border-radius:0;cursor:pointer}
+.vol{width:74px}
+.set-ctl input[type=range]{width:104px}
+
+.vol::-webkit-slider-runnable-track,
+.set-ctl input[type=range]::-webkit-slider-runnable-track{
+  height:2px;background:var(--line2);border-radius:2px;
+}
+.vol::-moz-range-track,
+.set-ctl input[type=range]::-moz-range-track{
+  height:2px;background:var(--line2);border-radius:2px;
+}
+.vol::-webkit-slider-thumb,
+.set-ctl input[type=range]::-webkit-slider-thumb{
+  appearance:none;-webkit-appearance:none;
+  width:10px;height:16px;margin-top:-7px;   /* centre the thumb on the track */
+  background:var(--amber);border:none;cursor:pointer;
+  transition:transform .12s ease;
+}
+.vol::-moz-range-thumb,
+.set-ctl input[type=range]::-moz-range-thumb{
+  width:10px;height:16px;background:var(--amber);border:none;border-radius:0;cursor:pointer;
+}
+.vol:hover::-webkit-slider-thumb,
+.set-ctl input[type=range]:hover::-webkit-slider-thumb{transform:scaleX(1.3)}
+.vol:active::-webkit-slider-thumb,
+.set-ctl input[type=range]:active::-webkit-slider-thumb{transform:scaleX(1.5)}
 .volpct{font-size:9px;color:var(--dim);width:34px;text-align:right}
 .volpct.boost{color:var(--amber)}
 .novol{font-size:9px;color:var(--faint);letter-spacing:.1em}
@@ -526,17 +554,6 @@ main{flex:1;display:flex;min-height:0}
 .set-lbl{font-size:11px;color:var(--text);line-height:1.35}
 .set-lbl em{display:block;font-style:normal;font-size:9px;color:var(--faint);margin-top:2px}
 .set-ctl{display:flex;align-items:center;gap:8px;flex:none}
-.set-ctl input[type=range]{
-  appearance:none;-webkit-appearance:none;width:96px;height:2px;
-  background:var(--line2);outline:none;cursor:pointer;
-}
-.set-ctl input[type=range]::-webkit-slider-thumb{
-  appearance:none;-webkit-appearance:none;width:9px;height:14px;
-  background:var(--amber);border:none;cursor:pointer;
-}
-.set-ctl input[type=range]::-moz-range-thumb{
-  width:9px;height:14px;background:var(--amber);border:none;border-radius:0;cursor:pointer;
-}
 .set-val{font-size:10px;color:var(--dim);width:42px;text-align:right}
 
 .toggle{
