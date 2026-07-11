@@ -194,8 +194,13 @@ header{
 
 /* ---------- main ---------- */
 main{flex:1;display:flex;min-height:0}
-/* the deck is a positioning canvas — tiles are absolutely placed by %-rect */
-.deck{flex:1;position:relative;padding:4px;min-width:0;min-height:0}
+/* The deck is a positioning canvas — tiles are absolutely placed by %-rect.
+   z-index lifts the WHOLE deck above the fixed scanline/grain/vignette layers
+   (40-42) so no texture ever paints over a stream. Lifting .tile-body instead
+   does NOT work: .tile has a filling animation on transform, which makes it a
+   stacking context and traps any z-index set inside it. The texture still sits
+   over the surrounding chrome, which is the point of it. */
+.deck{flex:1;position:relative;z-index:45;padding:4px;min-width:0;min-height:0}
 
 /* ---------- tile ---------- */
 .tile{
@@ -302,8 +307,10 @@ main{flex:1;display:flex;min-height:0}
 .corner.br{right:4px;bottom:4px;border-right:2px solid var(--amber);border-bottom:2px solid var(--amber)}
 
 /* ---------- chat panel ---------- */
+/* lifted above the texture layers too — the chat is meant to read exactly like
+   twitch's, and scanlines over 13px text ruin it */
 .chatpanel{
-  width:340px;flex:none;display:flex;flex-direction:column;
+  width:340px;flex:none;display:flex;flex-direction:column;position:relative;z-index:45;
   border-left:1px solid var(--line);background:var(--panel);
 }
 .chat-hd{
