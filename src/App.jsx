@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 /* ============================================================
    STREAMSEER — multiview broadcast console
@@ -11,6 +11,8 @@ const MAX_FEEDS = 12
 const DEFAULT_VOL = 0.5
 const STORE_KEY = 'streamseer:v1'
 const AUTH_KEY = 'streamseer:auth'
+const MAX_MSGS = 150     // twitch's own scrollback depth
+const FLUSH_MS = 120     // commit incoming chat in batches, not per-message
 
 /* twitch app client id — public by design (implicit oauth has no secret).
    unset → chat stays anonymous + read-only, everything else works. */
@@ -314,8 +316,47 @@ main{flex:1;display:flex;min-height:0}
 }
 .stchat .msgs::-webkit-scrollbar{width:8px}
 .stchat .msgs::-webkit-scrollbar-thumb{background:#3f3f46;border-radius:4px}
-.msg{padding:5px 20px;overflow-wrap:anywhere;word-break:break-word}
+.msg{position:relative;padding:5px 20px;overflow-wrap:anywhere;word-break:break-word}
 .msg:hover{background:#1f1f23}
+
+.reply-ctx{
+  font-size:11px;line-height:16px;color:#adadb8;margin-bottom:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.reply-ctx b{font-weight:600;color:#adadb8}
+
+/* copy / reply, revealed on message hover (twitch puts them here too) */
+.msg-acts{
+  position:absolute;top:2px;right:8px;display:none;gap:2px;z-index:2;
+  background:#18181bf2;border:1px solid #3f3f46;border-radius:4px;padding:2px;
+}
+.msg:hover .msg-acts{display:flex}
+.msg-acts button{
+  display:flex;align-items:center;justify-content:center;
+  width:22px;height:22px;padding:0;border:none;border-radius:3px;cursor:pointer;
+  background:transparent;color:#adadb8;transition:background .1s, color .1s;
+}
+.msg-acts button:hover{background:#3f3f46;color:#efeff1}
+
+.copied{
+  position:absolute;left:50%;bottom:58px;transform:translateX(-50%);z-index:30;
+  background:#efeff1;color:#18181b;font-family:Inter,sans-serif;font-size:11px;
+  font-weight:600;padding:5px 10px;border-radius:4px;pointer-events:none;
+  animation:tileIn .12s ease both;
+}
+
+.replybar{
+  position:absolute;left:0;right:0;bottom:100%;display:flex;align-items:center;gap:8px;
+  padding:6px 10px;background:#1f1f23;border-top:1px solid #3f3f46;
+  font-family:Inter,sans-serif;font-size:12px;color:#adadb8;
+}
+.rb-txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-txt b{color:#efeff1;font-weight:600}
+.rb-x{
+  flex:none;background:transparent;border:none;color:#adadb8;cursor:pointer;
+  font-size:12px;padding:2px 4px;line-height:1;border-radius:3px;
+}
+.rb-x:hover{background:#3f3f46;color:#efeff1}
 .msg .nick{font-weight:700}
 .msg .sep{color:#efeff1}
 .msg .txt{color:#efeff1}
@@ -732,6 +773,48 @@ function segmentTwitchEmotes(text, emotesTag) {
 
 const BADGE_MAP = { broadcaster: ['BC', 'b-bc'], moderator: ['MOD', 'b-mod'], vip: ['VIP', 'b-vip'], subscriber: ['SUB', 'b-sub'] }
 
+/* memoised so a burst of new messages doesn't re-render the whole backlog —
+   in a fast chat that re-render is what stops the pane keeping up with scroll */
+const Msg = memo(function Msg({ msg, emoteMap, canReply, onCopy, onReply }) {
+  const parent = msg.tags['reply-parent-display-name']
+  return (
+    <div className="msg">
+      {parent && (
+        <div className="reply-ctx" title={msg.tags['reply-parent-msg-body']}>
+          ↩ Replying to <b>@{parent}</b>
+        </div>
+      )}
+      <div className="msg-acts">
+        <button type="button" title="Copy message" onClick={() => onCopy(msg)}>
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <rect x="4.5" y="4.5" width="8" height="8" rx="1" />
+            <path d="M9.5 2.5h-7a1 1 0 0 0-1 1v7" />
+          </svg>
+        </button>
+        {canReply && (
+          <button type="button" title="Reply" onClick={() => onReply(msg)}>
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <path d="M5.5 2.5 1.5 6l4 3.5" />
+              <path d="M1.5 6h6a5 5 0 0 1 5 5v.5" />
+            </svg>
+          </button>
+        )}
+      </div>
+      {(msg.tags.badges || '').split(',').map(b => {
+        const info = BADGE_MAP[b.split('/')[0]]
+        return info ? <span className={`badge ${info[1]}`} key={b}>{info[0]}</span> : null
+      })}
+      <span className="nick" style={{ color: nickColor(msg.tags, msg.login) }}>
+        {msg.tags['display-name'] || msg.login}
+      </span>
+      <span className="sep">{msg.action ? ' ' : ': '}</span>
+      <span className={'txt' + (msg.action ? ' action' : '')}>
+        <MsgBody text={msg.text} emotesTag={msg.tags.emotes} emoteMap={emoteMap} />
+      </span>
+    </div>
+  )
+})
+
 function MsgBody({ text, emotesTag, emoteMap }) {
   const pieces = []
   for (const seg of segmentTwitchEmotes(text, emotesTag)) {
@@ -858,12 +941,16 @@ function TwitchChat({ channel, visible, auth }) {
   const [emoteMap, setEmoteMap] = useState(() => new Map())
   const [status, setStatus] = useState('sync')
   const [draft, setDraft] = useState('')
-  const [sugg, setSugg] = useState(null)   // {items, idx, from, to} — tab-completion
+  const [sugg, setSugg] = useState(null)      // {items, idx, from, to} — tab-completion
+  const [replyTo, setReplyTo] = useState(null) // {id, name, body} — native twitch reply
+  const [copied, setCopied] = useState(false)
   const scrollRef = useRef(null)
   const sockRef = useRef(null)
   const inputRef = useRef(null)
   const pinned = useRef(true)
   const nextId = useRef(0)
+  const inbox = useRef([])        // messages awaiting the next flush
+  const flushTimer = useRef(null)
 
   useEffect(() => {
     let dead = false
@@ -898,7 +985,6 @@ function TwitchChat({ channel, visible, auth }) {
         setStatus('live')
       }
       ws.onmessage = ev => {
-        const batch = []
         for (const line of String(ev.data).split('\r\n')) {
           if (!line) continue
           if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); continue }
@@ -912,13 +998,24 @@ function TwitchChat({ channel, visible, auth }) {
           let text = m[3]
           let action = false
           if (text.charCodeAt(0) === 1) { action = true; text = text.slice(8, -1) }
-          batch.push({ id: ++nextId.current, login: m[2], text, tags, action })
+          inbox.current.push({ id: ++nextId.current, login: m[2], text, tags, action })
         }
-        /* twitch keeps a 150-line scrollback; match it */
-        if (batch.length) setMsgs(prev => {
-          const next = [...prev, ...batch]
-          return next.length > 150 ? next.slice(-150) : next
-        })
+        /* Flush on a timer instead of per-message. In a chat like caedrel's,
+           committing every line re-renders and re-pins the scroll dozens of
+           times a second and the pane can't keep up. One paint per FLUSH_MS
+           with a memoised row keeps it glued to the bottom. */
+        if (inbox.current.length && !flushTimer.current) {
+          flushTimer.current = setTimeout(() => {
+            flushTimer.current = null
+            const batch = inbox.current
+            inbox.current = []
+            if (!batch.length) return
+            setMsgs(prev => {
+              const next = prev.length ? [...prev, ...batch] : batch
+              return next.length > MAX_MSGS ? next.slice(-MAX_MSGS) : next
+            })
+          }, FLUSH_MS)
+        }
       }
       ws.onclose = () => {
         if (!dead) { setStatus('reconn'); retry = setTimeout(connect, 2500) }
@@ -1001,31 +1098,57 @@ function TwitchChat({ channel, visible, auth }) {
     setSugg(items.length ? { items, idx: 0, from, to: caret } : null)
   }
 
+  const onCopy = useCallback(msg => {
+    navigator.clipboard.writeText(msg.text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    }).catch(() => { /* clipboard blocked — nothing useful to do */ })
+  }, [])
+
+  const onReply = useCallback(msg => {
+    setReplyTo({
+      id: msg.tags.id,
+      name: msg.tags['display-name'] || msg.login,
+      body: msg.text,
+    })
+    inputRef.current?.focus()
+  }, [])
+
   const send = e => {
     e.preventDefault()
     if (sugg) { accept(sugg.items[sugg.idx]); return }   // Enter accepts, doesn't send
     const text = draft.trim()
     const ws = sockRef.current
     if (!text || !auth || !ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(`PRIVMSG #${channel} :${text}`)
+
+    /* a real twitch reply is an IRCv3 tag on the PRIVMSG, not an @mention —
+       this threads under the parent message in every twitch client */
+    const tag = replyTo && replyTo.id ? `@reply-parent-msg-id=${replyTo.id} ` : ''
+    ws.send(`${tag}PRIVMSG #${channel} :${text}`)
+
     /* twitch doesn't echo our own message back, so render it locally */
+    const tags = { 'display-name': auth.login, badges: '', emotes: '' }
+    if (replyTo && replyTo.id) {
+      tags['reply-parent-display-name'] = replyTo.name
+      tags['reply-parent-msg-body'] = replyTo.body
+    }
     setMsgs(prev => [...prev, {
-      id: ++nextId.current,
-      login: auth.login,
-      text,
-      tags: { 'display-name': auth.login, badges: '', emotes: '' },
-      action: false,
-      mine: true,
+      id: ++nextId.current, login: auth.login, text, tags, action: false,
     }])
     pinned.current = true
+    setReplyTo(null)
     setDraft('')
   }
 
-  /* stay pinned to the newest message unless the user scrolled up */
-  useEffect(() => {
+  /* stay pinned to the newest message unless the user scrolled up.
+     layout effect so the jump happens before paint — with useEffect a fast
+     chat visibly shudders as each batch paints un-scrolled, then snaps. */
+  useLayoutEffect(() => {
     const el = scrollRef.current
     if (el && pinned.current && visible) el.scrollTop = el.scrollHeight
   }, [msgs, visible])
+
+  useEffect(() => () => clearTimeout(flushTimer.current), [])
 
   return (
     <div className={'stchat chatpane' + (visible ? ' on' : '')}>
@@ -1037,23 +1160,25 @@ function TwitchChat({ channel, visible, auth }) {
         }}
       >
         {msgs.map(msg => (
-          <div className="msg" key={msg.id}>
-            {(msg.tags.badges || '').split(',').map(b => {
-              const info = BADGE_MAP[b.split('/')[0]]
-              return info ? <span className={`badge ${info[1]}`} key={b}>{info[0]}</span> : null
-            })}
-            <span className="nick" style={{ color: nickColor(msg.tags, msg.login) }}>
-              {msg.tags['display-name'] || msg.login}
-            </span>
-            <span className="sep">{msg.action ? ' ' : ': '}</span>
-            <span className={'txt' + (msg.action ? ' action' : '')}>
-              <MsgBody text={msg.text} emotesTag={msg.tags.emotes} emoteMap={emoteMap} />
-            </span>
-          </div>
+          <Msg
+            key={msg.id}
+            msg={msg}
+            emoteMap={emoteMap}
+            canReply={!!auth && !!msg.tags.id}
+            onCopy={onCopy}
+            onReply={onReply}
+          />
         ))}
       </div>
+      {copied && <div className="copied">COPIED</div>}
       {auth && (
         <form className="composer" onSubmit={send}>
+          {replyTo && (
+            <div className="replybar">
+              <span className="rb-txt">↩ Replying to <b>@{replyTo.name}</b></span>
+              <button type="button" className="rb-x" onClick={() => setReplyTo(null)} title="Cancel reply">✕</button>
+            </div>
+          )}
           {sugg && (
             <div className="sugg">
               <div className="sugg-list">

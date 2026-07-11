@@ -38,6 +38,15 @@ unhover — and the chat panel swaps to that stream's chat.
   plus 7TV global + channel emotes (channel twitch-id resolved via api.ivr.fi, emote sets
   from 7tv.io/v3; zero-width emotes overlay the previous emote). YouTube/Kick chats remain
   plain iframes — 7TV has no presence there.
+- **Fast-chat throughput**: incoming IRC lines buffer in a ref and commit once every
+  `FLUSH_MS` (120ms), and each row is a memoised `<Msg>`. Committing per message re-rendered
+  the whole 150-row backlog and re-pinned the scroll dozens of times a second, which is what
+  made a fast chat (caedrel et al) fall off the bottom. The scroll pin is a `useLayoutEffect`
+  so it lands before paint. Load-tested pinned at 150 msg/s.
+- **Message actions**: hovering a message reveals copy + reply. Reply is a *native* twitch
+  reply — an IRCv3 `@reply-parent-msg-id=<id>` tag on the PRIVMSG, which threads properly in
+  every twitch client, not an `@mention`. Needs `msg.tags.id`, so it only shows for messages
+  received over IRC (and when logged in).
 - **Emote tab-completion**: the composer completes emote names Chatterino-style — Tab opens
   a suggestion bubble over the input, Tab/shift-Tab and arrows cycle, Enter/click inserts,
   Esc dismisses. The index merges 7TV (global + channel), Twitch natives via Helix (global +
