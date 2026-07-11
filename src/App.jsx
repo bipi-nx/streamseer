@@ -14,9 +14,17 @@ const AUTH_KEY = 'streamseer:auth'
 const MAX_MSGS = 150     // twitch's own scrollback depth
 const FLUSH_MS = 120     // commit incoming chat in batches, not per-message
 
-/* twitch app client id — public by design (implicit oauth has no secret).
-   unset → chat stays anonymous + read-only, everything else works. */
-const TWITCH_CLIENT_ID = import.meta.env.VITE_TWITCH_CLIENT_ID || ''
+/* Twitch app client ids — public by design (implicit oauth has no secret).
+   A twitch app only accepts redirect URIs registered against it, matched
+   byte-for-byte, so dev and prod use separate apps. Unset → chat stays
+   anonymous + read-only and everything else still works. */
+const CLIENT_ID_DEV = import.meta.env.VITE_TWITCH_CLIENT_ID || ''
+const CLIENT_ID_PROD = import.meta.env.VITE_TWITCH_CLIENT_ID_PROD || ''
+
+const isLocal = typeof window !== 'undefined'
+  && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname)
+
+const TWITCH_CLIENT_ID = (isLocal ? CLIENT_ID_DEV : CLIENT_ID_PROD) || CLIENT_ID_DEV
 
 /* ---------- css ---------- */
 const css = `
@@ -428,8 +436,10 @@ main{flex:1;display:flex;min-height:0}
 /* ---------- toast ---------- */
 .toast{
   position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:60;
+  max-width:min(720px, 90vw);
   background:#16100a;border:1px solid var(--amber);color:var(--amber);
-  font-size:11px;letter-spacing:.12em;padding:10px 18px;white-space:nowrap;
+  font-size:11px;letter-spacing:.12em;line-height:1.7;padding:10px 18px;
+  text-align:center;overflow-wrap:anywhere;
   animation:tileIn .25s ease both;box-shadow:0 8px 30px #000c;
 }
 
@@ -954,6 +964,17 @@ const SCOPES = 'chat:read chat:edit user:read:emotes'
    it must be byte-identical to one of them, trailing slash and all */
 function redirectUri() {
   return window.location.origin + window.location.pathname.replace(/\/$/, '')
+}
+
+/* the #1 cause of "redirect_uri does not match" is registering a URL that
+   differs by a character (trailing slash, http vs https). print the exact
+   string so it can be pasted into the twitch console verbatim. */
+if (typeof window !== 'undefined' && TWITCH_CLIENT_ID) {
+  console.info(
+    '[streamseer] twitch oauth\n  client_id:    %s\n  redirect_uri: %s\n' +
+    '  ^ this exact string must be listed in the app\'s OAuth Redirect URLs',
+    TWITCH_CLIENT_ID, redirectUri(),
+  )
 }
 
 function beginLogin() {
@@ -1508,7 +1529,14 @@ export default function App() {
       const res = await consumeRedirect()
       if (dead) return
       if (res && res.err) {
-        say('TWITCH LOGIN FAILED — ' + res.err.toUpperCase(), 8000)
+        const mismatch = /redirect/i.test(res.err)
+        if (mismatch) console.error('[streamseer] twitch rejected redirect_uri: %s', redirectUri())
+        say(
+          mismatch
+            ? 'TWITCH LOGIN FAILED — REGISTER ' + redirectUri() + ' AS AN OAUTH REDIRECT URL'
+            : 'TWITCH LOGIN FAILED — ' + res.err.toUpperCase(),
+          12000,
+        )
         return
       }
       if (res && res.ok) {
