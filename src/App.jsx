@@ -18,7 +18,7 @@ const TWITCH_CLIENT_ID = import.meta.env.VITE_TWITCH_CLIENT_ID || ''
 
 /* ---------- css ---------- */
 const css = `
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;600;700&display=swap');
 
 :root{
   --bg:#06070a;
@@ -166,23 +166,16 @@ header{
   padding:1px 4px;border:1px solid currentColor;opacity:.75}
 .src-7tv{color:#29d8a4} .src-twitch{color:var(--tw)}
 .src-channel{color:var(--amber)} .src-sub{color:#ff8ab5} .src-emoji{color:var(--dim)}
-.sugg-foot{
-  border-top:1px solid var(--line);padding:4px 8px;
-  font-size:8px;letter-spacing:.14em;color:var(--faint);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;
-}
 .composer input{
   flex:1;min-width:0;background:#080a0e;border:1px solid var(--line);color:var(--text);
   font-family:var(--mono);font-size:11px;padding:7px 9px;outline:none;transition:border-color .15s}
 .composer input:focus{border-color:var(--tw)}
-.composer input::placeholder{color:var(--faint)}
+.composer input::placeholder{color:#adadb8}
 /* scoped to the send button — .sugg-row is also a button inside .composer */
 .composer > button[type=submit]{
   flex:none;background:var(--tw);color:#0d0616;border:none;cursor:pointer;
   font-size:11px;padding:0 12px;transition:opacity .15s}
 .composer > button[type=submit]:disabled{opacity:.3;cursor:default}
-.msg.mine{background:#a970ff12;margin:0 -10px;padding:0 10px;
-  box-shadow:inset 2px 0 0 var(--tw)}
 
 /* ---------- main ---------- */
 main{flex:1;display:flex;min-height:0}
@@ -245,8 +238,10 @@ main{flex:1;display:flex;min-height:0}
 .killbtn:hover{color:var(--red)}
 
 /* overflow:hidden clips the control-strip curve to this tile — without it the
-   curve is drawn wider than the tile and bleeds over the neighbouring feed */
-.tile-body{flex:1;position:relative;min-height:0;background:#000;overflow:hidden}
+   curve is drawn wider than the tile and bleeds over the neighbouring feed.
+   z-index lifts the video above the fixed scanline/grain overlays so the
+   stream itself stays clean; the texture still sits over the surrounding UI */
+.tile-body{flex:1;position:relative;z-index:50;min-height:0;background:#000;overflow:hidden}
 .tile-body .mount{position:absolute;inset:0}
 .tile-body .mount iframe{width:100%;height:100%;border:0;display:block}
 
@@ -300,24 +295,33 @@ main{flex:1;display:flex;min-height:0}
   transition:all .15s}
 .chat-hd .popout:hover{color:var(--amber);border-color:var(--amber)}
 
-/* ---------- custom twitch chat w/ 7tv ---------- */
-.stchat{position:absolute;inset:0;flex-direction:column;font-size:12px}
-.stchat .msgs{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 10px 10px;
-  display:flex;flex-direction:column;gap:6px;
-  scrollbar-width:thin;scrollbar-color:#33405494 transparent}
-.stchat .msgs::-webkit-scrollbar{width:6px}
-.stchat .msgs::-webkit-scrollbar-thumb{background:var(--line)}
-.msg{line-height:1.55;overflow-wrap:anywhere;animation:msgIn .15s ease both}
-@keyframes msgIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
-.msg .nick{font-weight:600}
-.msg .sep{color:var(--faint)}
-.msg .txt{color:var(--text)}
+/* ---------- twitch chat — matched to twitch's own chat rendering ----------
+   twitch: Inter 13px / 20px line-height, 5px 20px row padding, #18181b bg,
+   #efeff1 text, 28px emotes, ~150-message scrollback */
+.stchat{position:absolute;inset:0;flex-direction:column;background:#18181b}
+.stchat .msgs{
+  flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 0;
+  font-family:Inter,'Helvetica Neue',Helvetica,Arial,sans-serif;
+  font-size:13px;line-height:20px;color:#efeff1;
+  scrollbar-width:thin;scrollbar-color:#3f3f46 transparent;
+}
+.stchat .msgs::-webkit-scrollbar{width:8px}
+.stchat .msgs::-webkit-scrollbar-thumb{background:#3f3f46;border-radius:4px}
+.msg{padding:5px 20px;overflow-wrap:anywhere;word-break:break-word}
+.msg:hover{background:#1f1f23}
+.msg .nick{font-weight:700}
+.msg .sep{color:#efeff1}
+.msg .txt{color:#efeff1}
 .msg .txt.action{font-style:italic}
-.msg .badge{display:inline-block;font-size:8px;font-weight:600;letter-spacing:.08em;
-  border:1px solid currentColor;padding:0 3px;margin-right:4px;vertical-align:1px;line-height:1.5}
-.b-bc{color:var(--red)} .b-mod{color:var(--green)} .b-vip{color:#ff8ab5} .b-sub{color:var(--amber)}
-.emw{display:inline-block;position:relative;vertical-align:middle;margin:-4px 1px}
-.emw img{height:24px;max-width:84px;object-fit:contain;vertical-align:middle;display:inline-block}
+.msg .badge{
+  display:inline-block;font-size:9px;font-weight:600;line-height:14px;
+  height:16px;min-width:16px;padding:0 3px;margin-right:4px;text-align:center;
+  border-radius:2px;vertical-align:-3px;color:#fff;border:none;
+}
+.b-bc{background:#e91916} .b-mod{background:#00ad03}
+.b-vip{background:#e005b9} .b-sub{background:#6441a5}
+.emw{display:inline-block;position:relative;vertical-align:middle;margin:-5px 2px}
+.emw img{height:28px;max-width:112px;object-fit:contain;vertical-align:middle;display:inline-block}
 .emw img.zw{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
 .stchat .conn{
   flex:none;display:flex;align-items:center;gap:10px;padding:5px 10px;
@@ -622,21 +626,34 @@ async function fetch7tv(channelId) {
 async function fetchTwitchEmotes(channelId, auth) {
   if (!auth) return []
   const head = { 'Client-Id': TWITCH_CLIENT_ID, Authorization: 'Bearer ' + auth.token }
-  const get = async url => {
+  /* /chat/emotes/user is paginated — subs with many emotes come back in
+     pages of 100, so a single call silently truncates the list */
+  const get = async (url, paged = false) => {
+    const out = []
+    let cursor = ''
     try {
-      const r = await fetch(url, { headers: head })
-      if (!r.ok) return []
-      const d = await r.json()
-      return d.data || []
-    } catch { return [] }
+      do {
+        const r = await fetch(url + (cursor ? '&after=' + cursor : ''), { headers: head })
+        if (!r.ok) {
+          console.warn('[streamseer] twitch emotes %s -> %s %s', url, r.status, await r.text())
+          break
+        }
+        const d = await r.json()
+        out.push(...(d.data || []))
+        cursor = paged && d.pagination ? (d.pagination.cursor || '') : ''
+      } while (cursor)
+    } catch (e) { console.warn('[streamseer] twitch emotes failed', e) }
+    return out
   }
+  const canUserEmotes = !auth.scopes || auth.scopes.includes('user:read:emotes')
   const [glob, chan, mine] = await Promise.all([
-    get('https://api.twitch.tv/helix/chat/emotes/global'),
+    get('https://api.twitch.tv/helix/chat/emotes/global?'),
     channelId ? get('https://api.twitch.tv/helix/chat/emotes?broadcaster_id=' + channelId) : [],
-    get('https://api.twitch.tv/helix/chat/emotes/user?user_id=' + auth.userId),
+    canUserEmotes ? get('https://api.twitch.tv/helix/chat/emotes/user?user_id=' + auth.userId, true) : [],
   ])
-  const pick = e =>
-    (e.images && (e.images.url_2x || e.images.url_1x)) || TW_EMOTE_CDN(e.id)
+  /* the user-emotes endpoint returns no `images` block — build the CDN url
+     from the id instead, or those emotes come back with an undefined src */
+  const pick = e => (e.images && (e.images.url_2x || e.images.url_1x)) || TW_EMOTE_CDN(e.id)
   return [
     ...glob.map(e => [e.name, { url: pick(e), zw: false, src: 'twitch' }]),
     ...chan.map(e => [e.name, { url: pick(e), zw: false, src: 'channel' }]),
@@ -750,6 +767,9 @@ function beginLogin() {
     response_type: 'token',
     scope: SCOPES,
     state,
+    /* re-prompt for consent — without this twitch silently reissues the
+       previously-granted scope set, so newly-added scopes never take effect */
+    force_verify: 'true',
   })
   window.location.href = 'https://id.twitch.tv/oauth2/authorize?' + p
 }
@@ -802,7 +822,10 @@ async function validateToken(token) {
     })
     if (!r.ok) return null
     const d = await r.json()
-    return { token, login: d.login, userId: d.user_id }
+    /* keep the granted scopes — twitch can hand back a token with FEWER
+       scopes than requested (silent re-auth reuses a prior grant), and that
+       silently disables the user's own emote list */
+    return { token, login: d.login, userId: d.user_id, scopes: d.scopes || [] }
   } catch {
     return null
   }
@@ -869,9 +892,10 @@ function TwitchChat({ channel, visible, auth }) {
           if (text.charCodeAt(0) === 1) { action = true; text = text.slice(8, -1) }
           batch.push({ id: ++nextId.current, login: m[2], text, tags, action })
         }
+        /* twitch keeps a 150-line scrollback; match it */
         if (batch.length) setMsgs(prev => {
           const next = [...prev, ...batch]
-          return next.length > 220 ? next.slice(-160) : next
+          return next.length > 150 ? next.slice(-150) : next
         })
       }
       ws.onclose = () => {
@@ -991,7 +1015,7 @@ function TwitchChat({ channel, visible, auth }) {
         }}
       >
         {msgs.map(msg => (
-          <div className={'msg' + (msg.mine ? ' mine' : '')} key={msg.id}>
+          <div className="msg" key={msg.id}>
             {(msg.tags.badges || '').split(',').map(b => {
               const info = BADGE_MAP[b.split('/')[0]]
               return info ? <span className={`badge ${info[1]}`} key={b}>{info[0]}</span> : null
@@ -1027,7 +1051,6 @@ function TwitchChat({ channel, visible, auth }) {
                   </button>
                 ))}
               </div>
-              <div className="sugg-foot">TAB / ↑↓ CYCLE · ENTER INSERT · ESC CLOSE</div>
             </div>
           )}
           <input
@@ -1037,7 +1060,7 @@ function TwitchChat({ channel, visible, auth }) {
             onKeyDown={onKeyDown}
             onBlur={() => setSugg(null)}
             maxLength={480}
-            placeholder={`send as ${auth.login}…  (tab = emotes)`}
+            placeholder="Send a message"
             spellCheck="false"
             autoComplete="off"
           />
