@@ -663,6 +663,7 @@ function YouTubeMount({ id, onApi, onTitle, onLive }) {
     el.appendChild(inner)
     loadYT().then(() => {
       if (dead) return
+      let started = false
       player = new window.YT.Player(inner, {
         videoId: id, width: '100%', height: '100%',
         playerVars: { autoplay: 1, mute: 1, playsinline: 1, rel: 0 },
@@ -671,21 +672,33 @@ function YouTubeMount({ id, onApi, onTitle, onLive }) {
             if (dead) return
             const data = e.target.getVideoData && e.target.getVideoData()
             if (data && data.title) onTitle(data.title)
+            /* the autoplay playerVar alone is unreliable through the iframe
+               API — kick it explicitly (muted, so the policy allows it), or
+               the feed just sits there unstarted until you poke the player's
+               own controls. twitch's embed autostarts on its own. */
+            e.target.mute()
+            try { e.target.playVideo() } catch { /* not ready */ }
             onApi({
               setVol: v => e.target.setVolume(Math.round(v * 100)),
               setMuted: m => (m ? e.target.mute() : e.target.unMute()),
               setPaused: p => (p ? e.target.pauseVideo() : e.target.playVideo()),
               /* 1 = PLAYING */
               toggle: () => (e.target.getPlayerState() === 1 ? e.target.pauseVideo() : e.target.playVideo()),
+              /* only force playback if it never started — never fight a
+                 deliberate pause */
+              ensurePlaying: () => { if (!started) { try { e.target.playVideo() } catch { /* gone */ } } },
             })
           },
-          /* PLAYING(1) marks the end of loading. UNSTARTED(-1)/BUFFERING(3)
-             mean it hasn't got there yet; ENDED(0) means there's nothing to
-             play. A pause mid-video keeps it eligible. */
+          /* PLAYING(1) marks the end of loading. UNSTARTED(-1)/CUED(5) mean
+             autoplay didn't take, so retry. ENDED(0) means nothing to play.
+             A pause mid-video keeps it eligible. */
           onStateChange: e => {
             if (dead) return
-            if (e.data === 1) onLive(true)
+            if (e.data === 1) { started = true; onLive(true) }
             else if (e.data === 0) onLive(false)
+            else if ((e.data === -1 || e.data === 5) && !started) {
+              try { e.target.playVideo() } catch { /* gone */ }
+            }
           },
           onError: () => { if (!dead) onLive(false) },
         },
@@ -1633,9 +1646,17 @@ export default function App() {
   })
 
   /* players mount muted to satisfy autoplay policy; after the first user
-     gesture, re-run the audio sync so default-unmuted feeds go audible */
+     gesture, re-run the audio sync so default-unmuted feeds go audible — and
+     kick any player that never actually started (youtube's autoplay through
+     the iframe API is unreliable, and our hover shield covers the video, so
+     the user can't just click the player's own play button) */
   useEffect(() => {
-    const arm = () => setApiTick(t => t + 1)
+    const arm = () => {
+      for (const api of apis.current.values()) {
+        if (api.ensurePlaying) api.ensurePlaying()
+      }
+      setApiTick(t => t + 1)
+    }
     window.addEventListener('pointerdown', arm, { once: true })
     window.addEventListener('keydown', arm, { once: true })
     return () => {
@@ -1696,7 +1717,14 @@ export default function App() {
     setInteractive(i => (i === key ? null : i))
   }, [])
   const onLock = useCallback(key => {
-    if (liveRef.current[key] !== true) return
+    /* not playing yet → the click means "start it", not "lock it". without
+       this, clicking a stalled feed did nothing at all and you had to reach
+       for the player's own controls. */
+    if (liveRef.current[key] !== true) {
+      const api = apis.current.get(key)
+      if (api && api.ensurePlaying) api.ensurePlaying()
+      return
+    }
     setLocked(l => {
       const next = l === key ? null : key
       if (next) { setActiveChat(next); chatLoaded.current.add(next) }
@@ -1711,6 +1739,7 @@ export default function App() {
   const n = streams.length
   const chatStream = streams.find(s => s.key === activeChat)
   const chatFeeds = streams.filter(s => chatLoaded.current.has(s.key))
+  const hasTwitch = streams.some(s => s.platform === 'twitch')
 
   /* layout is a set of %-rects over one flat container; a fullscreened tile
      takes the whole deck and the rest stay MOUNTED but hidden (and paused) —
@@ -1780,7 +1809,9 @@ export default function App() {
         </form>
         <div className="hd-right">
           <span className="feedcount"><b>{String(n).padStart(2, '0')}</b>/{MAX_FEEDS}</span>
-          {TWITCH_CLIENT_ID && (auth ? (
+          {/* auth is per-platform and only offered for platforms actually on
+              the wall — a twitch login is noise if you're only watching yt */}
+          {TWITCH_CLIENT_ID && hasTwitch && (auth ? (
             <button
               className={'authbtn on' + (armed ? ' armed' : '')}
               onClick={logout}

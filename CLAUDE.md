@@ -82,6 +82,16 @@ unhover — and the chat panel swaps to that stream's chat.
 - **Control-strip affordance**: hovering the bottom 10% of a tile raises a translucent curved
   shelf. `.tile-body` must keep `overflow:hidden` — the curve is drawn wider than the tile and
   will bleed onto the neighbouring feed without it.
+- **Auth is per-platform and contextual**: a platform's login button only renders when a feed
+  of that platform is on the wall (a twitch login is noise if you're only watching youtube).
+  Only twitch is implemented. YouTube would need Google OAuth + YouTube Data API v3
+  `liveChatMessages.insert` (50 quota units per message against a 10k/day default = ~200
+  messages/day) and its own Google Cloud client ID. Kick has no public OAuth/chat-send API.
+- **YouTube autoplay**: the `autoplay` playerVar is unreliable through the IFrame API — the
+  feed sits UNSTARTED until something calls `playVideo()`. `YouTubeMount` calls it explicitly
+  on ready, retries on UNSTARTED(-1)/CUED(5), and `api.ensurePlaying()` is called on the first
+  user gesture and on clicking a not-yet-playing tile. It never forces play on a feed that has
+  already started, so a deliberate pause is respected. Twitch's embed autostarts on its own.
 - **Twitch login is optional**: `VITE_TWITCH_CLIENT_ID` (in `.env`, committed — implicit
   OAuth has no secret, the ID is public). CONNECT TWITCH runs the implicit flow, the token
   lands in the URL fragment, is validated against id.twitch.tv/oauth2/validate, and is kept
