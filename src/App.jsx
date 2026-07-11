@@ -127,6 +127,11 @@ header{
 .authbtn:hover{background:#a970ff1a;box-shadow:0 0 16px #a970ff26}
 .authbtn.on{color:var(--green);border-color:#58e07c66}
 .authbtn.on:hover{background:#ff44381a;border-color:var(--red);color:var(--red)}
+.authbtn.armed,.authbtn.armed:hover{
+  color:var(--red);border-color:var(--red);background:#ff44381f;
+  animation:armPulse 1s ease-in-out infinite;
+}
+@keyframes armPulse{0%,100%{box-shadow:0 0 0 0 #ff443800}50%{box-shadow:0 0 14px 0 #ff443859}}
 .authbtn .av{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
 
 .composer{flex:none;position:relative;display:flex;gap:6px;padding:7px;
@@ -289,7 +294,9 @@ main{flex:1;display:flex;min-height:0}
 }
 .chat-hd .lbl{font-size:9px;letter-spacing:.26em;color:var(--faint);white-space:nowrap}
 .chat-hd .who{font-family:var(--disp);font-weight:600;font-size:12px;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  text-transform:uppercase;color:var(--amber);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;animation:whoIn .22s cubic-bezier(.22,.9,.28,1) both}
+@keyframes whoIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
 .chat-hd .popout{margin-left:auto;font-size:9px;letter-spacing:.16em;color:var(--faint);
   text-decoration:none;border:1px solid var(--line);padding:3px 7px;white-space:nowrap;
   transition:all .15s}
@@ -298,7 +305,7 @@ main{flex:1;display:flex;min-height:0}
 /* ---------- twitch chat — matched to twitch's own chat rendering ----------
    twitch: Inter 13px / 20px line-height, 5px 20px row padding, #18181b bg,
    #efeff1 text, 28px emotes, ~150-message scrollback */
-.stchat{position:absolute;inset:0;flex-direction:column;background:#18181b}
+.stchat{display:flex;flex-direction:column;background:#18181b}
 .stchat .msgs{
   flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 0;
   font-family:Inter,'Helvetica Neue',Helvetica,Arial,sans-serif;
@@ -331,8 +338,23 @@ main{flex:1;display:flex;min-height:0}
 .stchat .conn .st-sync{color:var(--amber)}
 .stchat .conn .st-reconn{color:var(--red)}
 .stchat .conn .stv{color:var(--dim);margin-left:auto}
-.chat-body{flex:1;position:relative;min-height:0}
-.chat-body iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.chat-body{flex:1;position:relative;min-height:0;overflow:hidden}
+.chat-body iframe{width:100%;height:100%;border:0}
+
+/* chats stay mounted (instant switch back, no IRC reconnect) — so the swap is
+   a quick fade+swipe rather than a remount. visibility is delayed off the
+   outgoing pane so it can finish fading before it stops painting. */
+.chatpane{
+  position:absolute;inset:0;
+  opacity:0;visibility:hidden;transform:translateX(14px);
+  transition:opacity .14s ease, transform .2s cubic-bezier(.22,.9,.28,1),
+    visibility 0s linear .2s;
+}
+.chatpane.on{
+  opacity:1;visibility:visible;transform:none;
+  transition:opacity .16s ease, transform .22s cubic-bezier(.22,.9,.28,1),
+    visibility 0s;
+}
 .chat-idle{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:10px;color:var(--faint);text-align:center;padding:24px;
@@ -1006,7 +1028,7 @@ function TwitchChat({ channel, visible, auth }) {
   }, [msgs, visible])
 
   return (
-    <div className="stchat" style={{ display: visible ? 'flex' : 'none' }}>
+    <div className={'stchat chatpane' + (visible ? ' on' : '')}>
       <div
         className="msgs" ref={scrollRef}
         onScroll={e => {
@@ -1206,11 +1228,25 @@ export default function App() {
     return () => { dead = true }
   }, [say])
 
+  /* first click arms, second confirms — disarms on blur or after 4s so a
+     stray click can't leave it primed */
+  const [armed, setArmed] = useState(false)
+  const armTimer = useRef(null)
+  useEffect(() => () => clearTimeout(armTimer.current), [])
+
   const logout = useCallback(() => {
+    if (!armed) {
+      setArmed(true)
+      clearTimeout(armTimer.current)
+      armTimer.current = setTimeout(() => setArmed(false), 4000)
+      return
+    }
+    clearTimeout(armTimer.current)
+    setArmed(false)
     setAuth(null)
     localStorage.removeItem(AUTH_KEY)
     say('DISCONNECTED FROM TWITCH')
-  }, [say])
+  }, [armed, say])
 
   /* push audio state to every live player (runs after every render —
      also catches players that finish loading late).
@@ -1386,8 +1422,15 @@ export default function App() {
         <div className="hd-right">
           <span className="feedcount"><b>{String(n).padStart(2, '0')}</b>/{MAX_FEEDS}</span>
           {TWITCH_CLIENT_ID && (auth ? (
-            <button className="authbtn on" onClick={logout} title="Disconnect from Twitch">
-              <i className="av" />{auth.login}
+            <button
+              className={'authbtn on' + (armed ? ' armed' : '')}
+              onClick={logout}
+              onBlur={() => setArmed(false)}
+              title={armed ? 'Click again to disconnect' : 'Disconnect from Twitch'}
+            >
+              {armed
+                ? <>LOG OUT?</>
+                : <><i className="av" />{auth.login}</>}
             </button>
           ) : (
             <button className="authbtn" onClick={beginLogin} title="Sign in to send chat messages">
@@ -1427,7 +1470,7 @@ export default function App() {
             <div className="chat-hd">
               <span className="lbl">CHAT</span>
               {chatStream
-                ? <span className="who">{chatStream.label}</span>
+                ? <span className="who" key={chatStream.key}>{chatStream.label}</span>
                 : <span className="lbl">— AWAITING TARGET</span>}
               {chatStream && (
                 <a className="popout" href={popoutUrl(chatStream)} target="_blank" rel="noreferrer">
@@ -1441,8 +1484,8 @@ export default function App() {
               ) : (
                 <iframe
                   key={s.key}
+                  className={'chatpane' + (activeChat === s.key ? ' on' : '')}
                   src={chatUrl(s)}
-                  style={{ display: activeChat === s.key ? 'block' : 'none' }}
                   title={`chat:${s.key}`}
                 />
               ))}
