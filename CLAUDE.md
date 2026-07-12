@@ -154,6 +154,20 @@ unhover — and the chat panel swaps to that stream's chat.
 - No routing — single screen
 - No auth, no server — feeds persist in localStorage only
 
+## Wall URLs
+`/t/k3soju/robinsongz/yt/ludwig` loads that wall on open. A platform token switches the
+platform for everything after it (`t|ttv|twitch`, `yt|youtube|y`, `k|kick`); a bare path with
+no token defaults to twitch. The address bar is kept in sync with the wall via `replaceState`
+(not `pushState` — adding a feed shouldn't stack history entries), so the URL is always
+copy-pasteable without a share button. A wall in the URL **overrides** the saved one.
+
+Two things this depends on:
+- `vercel.json` rewrites every path to `/`. Without it the host 404s on `/t/...` — no such
+  file exists in a static build.
+- `redirectUri()` must stay the **bare origin**. The wall path is not a registered OAuth
+  redirect URI and twitch would reject it; the path is stashed in sessionStorage across the
+  login round trip and restored afterwards.
+
 ## To Wire Up Next
 - [ ] Viewer counts → sort/scale tiles by live viewers (needs Twitch Helix + YouTube Data API)
 - [ ] Drag-to-reorder tiles

@@ -1257,10 +1257,12 @@ function MsgBody({ text, emotesTag, emoteMap, me }) {
 /* ---------- twitch oauth (implicit flow — no backend, no secret) ---------- */
 const SCOPES = 'chat:read chat:edit user:read:emotes'
 
-/* twitch matches this literally against the app's registered redirect urls —
-   it must be byte-identical to one of them, trailing slash and all */
+/* Twitch matches this literally against the app's registered redirect urls, so
+   it must be the bare ORIGIN — the wall path (/t/k3soju/...) is not a registered
+   URI and would be rejected. The path is stashed and restored after the round
+   trip instead. */
 function redirectUri() {
-  return window.location.origin + window.location.pathname.replace(/\/$/, '')
+  return window.location.origin
 }
 
 /* the #1 cause of "redirect_uri does not match" is registering a URL that
@@ -1277,6 +1279,8 @@ if (typeof window !== 'undefined' && TWITCH_CLIENT_ID) {
 function beginLogin() {
   const state = Math.random().toString(36).slice(2)
   sessionStorage.setItem('streamseer:state', state)
+  /* twitch sends us back to the bare origin, so remember the wall we were on */
+  sessionStorage.setItem('streamseer:path', window.location.pathname)
   const p = new URLSearchParams({
     client_id: TWITCH_CLIENT_ID,
     redirect_uri: redirectUri(),
@@ -1311,7 +1315,10 @@ const REDIRECT = (() => {
   const token = frag.get('access_token')
   if (!err && !token) return null
 
-  history.replaceState(null, '', window.location.pathname)
+  /* twitch returns us to the bare origin — put the wall path back */
+  const back = sessionStorage.getItem('streamseer:path')
+  sessionStorage.removeItem('streamseer:path')
+  history.replaceState(null, '', back || window.location.pathname)
 
   if (err) {
     const desc = frag.get('error_description') || query.get('error_description') || err
@@ -1814,6 +1821,57 @@ function Toggle({ on, onClick }) {
   )
 }
 
+/* ---------- wall from the URL ----------
+   /t/k3soju/robinsongz/yt/ludwig  — a platform token switches the platform for
+   everything after it, so most walls read as /t/a/b/c. Tokens: t|ttv|twitch,
+   yt|youtube, k|kick. Bare path with no token defaults to twitch. */
+const PLATFORM_TOKENS = {
+  t: 'twitch', ttv: 'twitch', twitch: 'twitch',
+  yt: 'youtube', youtube: 'youtube', y: 'youtube',
+  k: 'kick', kick: 'kick',
+}
+
+function streamsFromPath(pathname) {
+  const parts = pathname.split('/').filter(Boolean).map(decodeURIComponent)
+  if (!parts.length) return []
+
+  const out = []
+  const seen = new Set()
+  let platform = 'twitch'
+
+  for (const raw of parts) {
+    const token = PLATFORM_TOKENS[raw.toLowerCase()]
+    if (token) { platform = token; continue }
+
+    /* a youtube id is a video id, not a channel — feed the parser the shape it
+       already knows so all the existing validation applies */
+    const asUrl =
+      platform === 'twitch' ? `twitch.tv/${raw}`
+        : platform === 'youtube' ? `https://www.youtube.com/watch?v=${raw}`
+          : `kick.com/${raw}`
+
+    const parsed = parseStream(asUrl)
+    if (!parsed) continue
+    const key = `${parsed.platform}:${parsed.id}`
+    if (seen.has(key) || out.length >= MAX_FEEDS) continue
+    seen.add(key)
+    out.push({ ...parsed, key })
+  }
+  return out
+}
+
+/* the inverse — what the current wall would look like as a shareable path */
+function pathFromStreams(streams) {
+  const SHORT = { twitch: 't', youtube: 'yt', kick: 'k' }
+  let platform = null
+  const parts = []
+  for (const s of streams) {
+    if (s.platform !== platform) { parts.push(SHORT[s.platform]); platform = s.platform }
+    parts.push(s.id)
+  }
+  return parts.length ? '/' + parts.join('/') : '/'
+}
+
 /* ---------- persistence ---------- */
 function loadStore() {
   try {
@@ -1829,7 +1887,13 @@ function loadStore() {
 /* ---------- app ---------- */
 export default function App() {
   const boot = useMemo(loadStore, [])
-  const [streams, setStreams] = useState(boot.streams)
+  /* a wall in the URL wins over the saved one — the whole point of pasting a
+     link is to get THAT wall, not whatever you were watching yesterday */
+  const fromUrl = useMemo(
+    () => (typeof window === 'undefined' ? [] : streamsFromPath(window.location.pathname)),
+    [],
+  )
+  const [streams, setStreams] = useState(fromUrl.length ? fromUrl : boot.streams)
   const [vols, setVols] = useState(boot.vols)
   const [muted, setMuted] = useState(boot.muted)
   const [hovered, setHovered] = useState(null)
@@ -1980,6 +2044,16 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORE_KEY, JSON.stringify({ streams, vols, muted }))
   }, [streams, vols, muted])
+
+  /* keep the address bar showing the current wall, so it's always copy-pasteable
+     without a "share" button. replaceState, not pushState — adding a feed
+     shouldn't stack up history entries you have to back out of one at a time. */
+  useEffect(() => {
+    const path = pathFromStreams(streams)
+    if (window.location.pathname !== path) {
+      history.replaceState(null, '', path + window.location.search)
+    }
+  }, [streams])
 
   useEffect(() => {
     localStorage.setItem(CHROME_KEY, chromeOff ? '1' : '0')
