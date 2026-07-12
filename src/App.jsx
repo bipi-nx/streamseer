@@ -499,14 +499,6 @@ main{flex:1;display:flex;min-height:0}
 .emw{display:inline-block;position:relative;vertical-align:middle;margin:-5px 2px}
 .emw img{height:28px;max-width:112px;object-fit:contain;vertical-align:middle;display:inline-block}
 .emw img.zw{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
-.stchat .conn{
-  flex:none;display:flex;align-items:center;gap:10px;padding:5px 10px;
-  border-top:1px solid var(--line);background:var(--panel2);
-  font-size:8px;letter-spacing:.2em;color:var(--faint);white-space:nowrap}
-.stchat .conn .st-live{color:var(--green)}
-.stchat .conn .st-sync{color:var(--amber)}
-.stchat .conn .st-reconn{color:var(--red)}
-.stchat .conn .stv{color:var(--dim);margin-left:auto}
 .chat-body{flex:1;position:relative;min-height:0;overflow:hidden}
 .chat-body iframe{width:100%;height:100%;border:0}
 
@@ -544,6 +536,19 @@ main{flex:1;display:flex;min-height:0}
   cursor:pointer;transition:all .15s;
 }
 .chips button:hover{border-color:var(--amber);color:var(--amber);background:#ffb52e0d}
+
+/* chat toggle that floats over the wall when the bar isn't there (fullscreen,
+   or bar hidden) — dim until you go near it, so it doesn't nag on a lobby TV */
+.floatchat{
+  position:absolute;top:10px;right:10px;z-index:72;
+  display:flex;align-items:center;justify-content:center;
+  padding:7px 9px;cursor:pointer;
+  background:#0c0f14b3;border:1px solid var(--line);border-radius:4px;
+  color:var(--dim);backdrop-filter:blur(6px);
+  opacity:.25;transition:opacity .18s ease, color .15s, border-color .15s;
+}
+.floatchat:hover{opacity:1;color:var(--amber);border-color:#ffb52e66}
+.app:hover .floatchat{opacity:.7}
 
 /* ---------- settings ---------- */
 .scrim{position:fixed;inset:0;z-index:80;background:#04060959}
@@ -1292,7 +1297,7 @@ async function validateToken(token) {
 function TwitchChat({ channel, visible, auth, fontSize }) {
   const [msgs, setMsgs] = useState([])
   const [emoteMap, setEmoteMap] = useState(() => new Map())
-  const [status, setStatus] = useState('sync')
+  const [, setStatus] = useState('sync')   // tracked for reconnect, not shown
   const [draft, setDraft] = useState('')
   const [sugg, setSugg] = useState(null)      // {items, idx, from, to} — tab-completion
   const [replyTo, setReplyTo] = useState(null) // {id, name, body} — native twitch reply
@@ -1568,12 +1573,6 @@ function TwitchChat({ channel, visible, auth, fontSize }) {
           <button type="submit" disabled={!draft.trim()}>▶</button>
         </form>
       )}
-      <div className="conn">
-        <span className={'st-' + status}>
-          {status === 'live' ? '● IRC LIVE' : status === 'sync' ? '◌ SYNCING' : '○ RECONNECTING'}
-        </span>
-        <span className="stv">7TV ×{emoteMap.size}</span>
-      </div>
     </div>
   )
 }
@@ -2268,6 +2267,29 @@ export default function App() {
           </aside>
         )}
       </main>
+
+      {/* the bar is gone in fullscreen (or when hidden), so the chat toggle
+          floats over the wall — otherwise there's no way to reach it */}
+      {(fullscreen || barHidden) && n > 0 && (
+        <button
+          className="floatchat"
+          /* sit over the wall, clear of the chat panel when it's open */
+          style={{ right: (chatOpen ? settings.chatWidth + 10 : 10) + 'px' }}
+          onClick={() => setChatOpen(o => !o)}
+          title={chatOpen ? 'Hide chat (c)' : 'Show chat (c)'}
+          aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
+        >
+          <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+            <g stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="square">
+              {chatOpen ? (
+                <><path d="M2 1.5v9" /><path d="M6 6h11" /><path d="M13.5 2.5 17 6l-3.5 3.5" /></>
+              ) : (
+                <><path d="M18 1.5v9" /><path d="M14 6H3" /><path d="M6.5 2.5 3 6l3.5 3.5" /></>
+              )}
+            </g>
+          </svg>
+        </button>
+      )}
 
       {settingsOpen && (
         <>
