@@ -489,6 +489,13 @@ main{flex:1;display:flex;min-height:0}
 /* twitch's link purple; the message row still hovers, links just take priority */
 .msg a{color:#bf94ff;text-decoration:none;cursor:pointer}
 .msg a:hover{text-decoration:underline}
+
+/* mentions — @someone reads as a name; @you is unmissable */
+.msg .at{font-weight:700;color:#dcd3ff}
+.msg .at.me{background:var(--tw);color:#fff;border-radius:3px;padding:0 4px}
+/* a message aimed at you: twitch's highlight — accent bar + tinted row */
+.msg.forme{background:#a970ff1c;box-shadow:inset 3px 0 0 var(--tw)}
+.msg.forme:hover{background:#a970ff2b}
 .msg .badge{
   display:inline-block;font-size:9px;font-weight:600;line-height:14px;
   height:16px;min-width:16px;padding:0 3px;margin-right:4px;text-align:center;
@@ -1090,6 +1097,13 @@ const LINK_RE = new RegExp(
   `^(https?:\\/\\/[^\\s]+|www\\.[^\\s]+|[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:${TLDS})(?:[\\/?#][^\\s]*)?)$`, 'i',
 )
 
+/* twitch treats a bare username as a mention too, not just "@name" */
+function mentions(text, login) {
+  if (!login) return false
+  const esc = login.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^\\w])@?${esc}(?![\\w])`, 'i').test(text)
+}
+
 function asLink(word) {
   const m = word.match(/^([^\w]*)(.*?)([.,!?;:)\]}'"]*)$/s)
   const [, lead, core, tail] = m
@@ -1100,10 +1114,17 @@ function asLink(word) {
 
 /* memoised so a burst of new messages doesn't re-render the whole backlog —
    in a fast chat that re-render is what stops the pane keeping up with scroll */
-const Msg = memo(function Msg({ msg, emoteMap, canReply, onCopy, onReply }) {
+const Msg = memo(function Msg({ msg, emoteMap, canReply, onCopy, onReply, me }) {
   const parent = msg.tags['reply-parent-display-name']
+  /* a message is "for you" if it @mentions you or replies to one of yours —
+     twitch marks both, and in a fast chat it's the only way to notice */
+  const repliedToMe = !!me
+    && (msg.tags['reply-parent-user-login'] || '').toLowerCase() === me.toLowerCase()
+  const mentionsMe = !!me && mentions(msg.text, me)
+  const forMe = (repliedToMe || mentionsMe) && msg.login.toLowerCase() !== me?.toLowerCase()
+
   return (
-    <div className="msg">
+    <div className={'msg' + (forMe ? ' forme' : '')}>
       {parent && (
         <div className="reply-ctx" title={msg.tags['reply-parent-msg-body']}>
           ↩ Replying to <b>@{parent}</b>
@@ -1134,13 +1155,13 @@ const Msg = memo(function Msg({ msg, emoteMap, canReply, onCopy, onReply }) {
       </span>
       <span className="sep">{msg.action ? ' ' : ': '}</span>
       <span className={'txt' + (msg.action ? ' action' : '')}>
-        <MsgBody text={msg.text} emotesTag={msg.tags.emotes} emoteMap={emoteMap} />
+        <MsgBody text={msg.text} emotesTag={msg.tags.emotes} emoteMap={emoteMap} me={me} />
       </span>
     </div>
   )
 })
 
-function MsgBody({ text, emotesTag, emoteMap }) {
+function MsgBody({ text, emotesTag, emoteMap, me }) {
   const pieces = []
   for (const seg of segmentTwitchEmotes(text, emotesTag)) {
     if (seg.t === 'emote') {
@@ -1156,6 +1177,12 @@ function MsgBody({ text, emotesTag, emoteMap }) {
         }
         const link = /\S/.test(w) ? asLink(w) : null
         if (link) { pieces.push({ link }); continue }
+        /* @name tokens read as mentions; yours gets the loud treatment */
+        const at = w.match(/^@([\w]+)([^\w]*)$/)
+        if (at) {
+          pieces.push({ at: '@' + at[1], tail: at[2], isMe: !!me && at[1].toLowerCase() === me.toLowerCase() })
+          continue
+        }
         pieces.push(w)
       }
     }
@@ -1183,6 +1210,13 @@ function MsgBody({ text, emotesTag, emoteMap }) {
           {lead}
           <a href={href} target="_blank" rel="noopener noreferrer nofollow">{core}</a>
           {tail}
+        </span>
+      )
+    }
+    if (p.at) {
+      return (
+        <span key={i}>
+          <b className={'at' + (p.isMe ? ' me' : '')}>{p.at}</b>{p.tail}
         </span>
       )
     }
@@ -1523,6 +1557,7 @@ function TwitchChat({ channel, visible, auth, fontSize }) {
             key={msg.id}
             msg={msg}
             emoteMap={emoteMap}
+            me={auth ? auth.login : null}
             canReply={!!auth && !!msg.tags.id}
             onCopy={onCopy}
             onReply={onReply}
