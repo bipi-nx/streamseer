@@ -99,6 +99,13 @@ unhover — and the chat panel swaps to that stream's chat.
   why **every twitch feed keeps an IRC socket open**, not just the one whose chat is on screen
   — the mention you'd actually miss is on the stream you're not looking at. YouTube/Kick chats
   are heavyweight iframes so those stay lazy. Toggle + volume live in settings.
+- **Chat scroll pin**: a `ResizeObserver` on `.msgs-inner` re-pins whenever the content height
+  changes. This is load-bearing — emote images do NOT load while a pane is hidden, so switching
+  to a chat reflows it *after* the scroll: the text rewraps around the emotes, the content grows
+  underneath, and the pane is left stranded above the bottom with no scroll event to correct it
+  (it looks frozen). A pane coming into view also force-pins, since it may have been filling for
+  minutes while hidden. Scrolling up to read still holds position — the pin only follows when the
+  user is already at the bottom.
 - **Fast-chat throughput**: incoming IRC lines buffer in a ref and commit once every
   `FLUSH_MS` (120ms), and each row is a memoised `<Msg>`. Committing per message re-rendered
   the whole 150-row backlog and re-pinned the scroll dozens of times a second, which is what

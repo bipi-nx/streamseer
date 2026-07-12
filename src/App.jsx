@@ -1381,6 +1381,10 @@ function TwitchChat({ channel, visible, auth, fontSize, onPing }) {
   meRef.current = auth ? auth.login : null
   const pingRef = useRef(null)
   pingRef.current = onPing
+  const innerRef = useRef(null)
+  const wasVisible = useRef(false)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
 
   useEffect(() => {
     let dead = false
@@ -1588,8 +1592,28 @@ function TwitchChat({ channel, visible, auth, fontSize, onPing }) {
      chat visibly shudders as each batch paints un-scrolled, then snaps. */
   useLayoutEffect(() => {
     const el = scrollRef.current
-    if (el && pinned.current && visible) el.scrollTop = el.scrollHeight
+    if (!el) return
+    /* a pane coming into view always starts at the newest message — it may have
+       been filling for minutes while hidden */
+    if (visible && !wasVisible.current) pinned.current = true
+    wasVisible.current = visible
+    if (pinned.current && visible) el.scrollTop = el.scrollHeight
   }, [msgs, visible])
+
+  /* Emote images don't load while a pane is hidden, so switching to a chat
+     reflows it moments AFTER we scroll — the text rewraps around the emotes and
+     the content grows underneath us, leaving the pane stranded above the bottom
+     with no scroll event to correct it. Re-pin whenever the content resizes. */
+  useEffect(() => {
+    const el = scrollRef.current
+    const inner = innerRef.current
+    if (!el || !inner || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (pinned.current && visibleRef.current) el.scrollTop = el.scrollHeight
+    })
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => () => clearTimeout(flushTimer.current), [])
 
@@ -1603,17 +1627,21 @@ function TwitchChat({ channel, visible, auth, fontSize, onPing }) {
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
         }}
       >
-        {msgs.map(msg => (
-          <Msg
-            key={msg.id}
-            msg={msg}
-            emoteMap={emoteMap}
-            me={auth ? auth.login : null}
-            canReply={!!auth && !!msg.tags.id}
-            onCopy={onCopy}
-            onReply={onReply}
-          />
-        ))}
+        {/* wrapper exists so a ResizeObserver can watch the content height —
+            the scroll container's own height never changes */}
+        <div className="msgs-inner" ref={innerRef}>
+          {msgs.map(msg => (
+            <Msg
+              key={msg.id}
+              msg={msg}
+              emoteMap={emoteMap}
+              me={auth ? auth.login : null}
+              canReply={!!auth && !!msg.tags.id}
+              onCopy={onCopy}
+              onReply={onReply}
+            />
+          ))}
+        </div>
       </div>
       {copied && <div className="copied">COPIED</div>}
       {auth && (
