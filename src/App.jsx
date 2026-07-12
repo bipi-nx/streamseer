@@ -29,6 +29,8 @@ const DEFAULTS = {
   chatSize: 13,        // twitch's own is 13px
   texture: true,       // scanlines / grain / vignette on the chrome
   zoom: true,          // the active tile grows
+  ping: true,          // flash + blip when a chat mentions you
+  pingVol: 0.6,
 }
 
 function loadSettings() {
@@ -287,6 +289,12 @@ main{flex:1;display:flex;min-height:0}
 }
 .tile.hov{border-color:var(--amber);box-shadow:0 0 0 1px #ffb52e40, 0 0 34px #ffb52e1c}
 .tile.fs{z-index:20}
+/* someone talked to you in this feed's chat */
+.tile.ping{animation:pingFlash .52s ease-in-out 3;z-index:21}
+@keyframes pingFlash{
+  0%,100%{border-color:var(--line);box-shadow:none}
+  50%{border-color:var(--red);box-shadow:0 0 0 2px var(--red), 0 0 30px #ff443873}
+}
 /* backgrounded by fullscreen: kept mounted (no reload) but invisible + inert */
 .tile.off{opacity:0;pointer-events:none}
 @keyframes tileIn{from{opacity:0;transform:scale(.97) translateY(8px)}to{opacity:1;transform:none}}
@@ -506,6 +514,20 @@ main{flex:1;display:flex;min-height:0}
 .emw{display:inline-block;position:relative;vertical-align:middle;margin:-5px 2px}
 .emw img{height:28px;max-width:112px;object-fit:contain;vertical-align:middle;display:inline-block}
 .emw img.zw{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+
+/* hovering an emote names it — the native title tooltip takes a second to show
+   up and can't say which provider it came from */
+.emw::after{
+  content:attr(data-emote) ' · ' attr(data-src);
+  position:absolute;left:50%;bottom:calc(100% + 5px);transform:translateX(-50%);
+  z-index:30;pointer-events:none;white-space:nowrap;
+  background:#000000eb;border:1px solid #3f3f46;border-radius:4px;
+  padding:4px 7px;
+  font-family:Inter,'Helvetica Neue',Helvetica,Arial,sans-serif;
+  font-size:11px;font-weight:600;line-height:1.3;color:#efeff1;
+  opacity:0;transition:opacity .1s ease .04s;
+}
+.emw:hover::after{opacity:1}
 .chat-body{flex:1;position:relative;min-height:0;overflow:hidden}
 .chat-body iframe{width:100%;height:100%;border:0}
 
@@ -1172,7 +1194,7 @@ function MsgBody({ text, emotesTag, emoteMap, me }) {
         const e = /\S/.test(w) ? emoteMap.get(w) : null
         if (e) {
           if (e.char) { pieces.push(e.char); continue }   // emoji → plain glyph
-          pieces.push({ url: e.url, name: w, zw: e.zw, overlays: [] })
+          pieces.push({ url: e.url, name: w, zw: e.zw, src: e.src, overlays: [] })
           continue
         }
         const link = /\S/.test(w) ? asLink(w) : null
@@ -1220,8 +1242,11 @@ function MsgBody({ text, emotesTag, emoteMap, me }) {
         </span>
       )
     }
+    /* zero-width emotes stacked on top are named too, so the tooltip shows the
+       whole combo the way it was typed */
+    const label = [p.name, ...p.overlays.map(o => o.name)].join(' ')
     return (
-      <span className="emw" key={i} title={p.name}>
+      <span className="emw" key={i} data-emote={label} data-src={(p.src || '').toUpperCase()}>
         <img src={p.url} alt={p.name} loading="lazy" />
         {p.overlays.map((o, k) => <img className="zw" key={k} src={o.url} alt={o.name} loading="lazy" />)}
       </span>
@@ -1328,7 +1353,7 @@ async function validateToken(token) {
   }
 }
 
-function TwitchChat({ channel, visible, auth, fontSize }) {
+function TwitchChat({ channel, visible, auth, fontSize, onPing }) {
   const [msgs, setMsgs] = useState([])
   const [emoteMap, setEmoteMap] = useState(() => new Map())
   const [, setStatus] = useState('sync')   // tracked for reconnect, not shown
@@ -1343,6 +1368,12 @@ function TwitchChat({ channel, visible, auth, fontSize }) {
   const nextId = useRef(0)
   const inbox = useRef([])        // messages awaiting the next flush
   const flushTimer = useRef(null)
+  /* refs so the socket's flush closure always sees the current values without
+     tearing down and rejoining the channel on every re-render */
+  const meRef = useRef(null)
+  meRef.current = auth ? auth.login : null
+  const pingRef = useRef(null)
+  pingRef.current = onPing
 
   useEffect(() => {
     let dead = false
@@ -1402,6 +1433,19 @@ function TwitchChat({ channel, visible, auth, fontSize }) {
             const batch = inbox.current
             inbox.current = []
             if (!batch.length) return
+
+            /* anything in this batch aimed at us pings the feed it came from —
+               this is why every twitch feed keeps a socket open, not just the
+               one whose chat is on screen */
+            const me = meRef.current
+            if (me && pingRef.current) {
+              const hit = batch.some(m =>
+                m.login.toLowerCase() !== me.toLowerCase()
+                && ((m.tags['reply-parent-user-login'] || '').toLowerCase() === me.toLowerCase()
+                  || mentions(m.text, me)))
+              if (hit) pingRef.current()
+            }
+
             setMsgs(prev => {
               const next = prev.length ? [...prev, ...batch] : batch
               return next.length > MAX_MSGS ? next.slice(-MAX_MSGS) : next
@@ -1625,7 +1669,8 @@ function TwitchGlyph() {
 
 /* ---------- tile ---------- */
 function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, hidden, fullscreen,
-  pct, onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive }) {
+  pinged, pct, onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle,
+  onFullscreen, onLive }) {
   /* what the player is really doing, after master + headroom + boost */
   const shownPct = pct
   const hasVolApi = stream.platform !== 'kick'
@@ -1636,7 +1681,7 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, h
   return (
     <div
       className={'tile' + (hovered ? ' hov' : '') + (locked ? ' locked' : '')
-        + (fullscreen ? ' fs' : '') + (hidden ? ' off' : '')}
+        + (fullscreen ? ' fs' : '') + (hidden ? ' off' : '') + (pinged ? ' ping' : '')}
       style={{
         left: `calc(${rect.l}% + 4px)`,
         top: `calc(${rect.t}% + 4px)`,
@@ -1718,6 +1763,33 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, h
   )
 }
 
+/* ---------- mention ping ----------
+   synthesised rather than shipped as an asset: two short blips, quiet and
+   short enough not to be obnoxious when a chat is busy */
+let audioCtx = null
+function playPing(vol) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return
+    if (!audioCtx) audioCtx = new AC()
+    if (audioCtx.state === 'suspended') audioCtx.resume()
+    const t0 = audioCtx.currentTime
+    for (const [i, hz] of [880, 1245].entries()) {
+      const osc = audioCtx.createOscillator()
+      const gain = audioCtx.createGain()
+      const at = t0 + i * 0.11
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(hz, at)
+      gain.gain.setValueAtTime(0, at)
+      gain.gain.linearRampToValueAtTime(vol * 0.28, at + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.16)
+      osc.connect(gain).connect(audioCtx.destination)
+      osc.start(at)
+      osc.stop(at + 0.18)
+    }
+  } catch { /* audio unavailable — the flash still fires */ }
+}
+
 /* ---------- settings widgets ---------- */
 function Row({ label, hint, value, children }) {
   return (
@@ -1773,7 +1845,12 @@ export default function App() {
   const [peek, setPeek] = useState(false)
   const [settings, setSettings] = useState(loadSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pinged, setPinged] = useState({})   // key -> flashing right now
+  const pingTimers = useRef(new Map())
   const set = useCallback((k, v) => setSettings(s => ({ ...s, [k]: v })), [])
+  /* the ping fires from a socket closure, which must not go stale */
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
   const [input, setInput] = useState('')
   const [toast, setToast] = useState(null)
   const [auth, setAuth] = useState(loadAuth)
@@ -2114,10 +2191,27 @@ export default function App() {
   const onVol = useCallback((key, v) => setVols(prev => ({ ...prev, [key]: v })), [])
   const onMute = useCallback(key => setMuted(prev => ({ ...prev, [key]: !prev[key] })), [])
 
+  /* someone talked to you in this feed's chat: flash the tile red and blip */
+  const onPing = useCallback(key => {
+    if (!settingsRef.current.ping) return
+    playPing(settingsRef.current.pingVol)
+    setPinged(p => ({ ...p, [key]: true }))
+    clearTimeout(pingTimers.current.get(key))
+    pingTimers.current.set(key, setTimeout(() => {
+      setPinged(p => { const n = { ...p }; delete n[key]; return n })
+    }, 1600))
+  }, [])
+
+  useEffect(() => () => pingTimers.current.forEach(clearTimeout), [])
+
   /* build the wall */
   const n = streams.length
   const chatStream = streams.find(s => s.key === activeChat)
-  const chatFeeds = streams.filter(s => chatLoaded.current.has(s.key))
+  /* Every TWITCH feed keeps a chat socket open, even one never hovered —
+     otherwise a mention on a stream you're not looking at is exactly the one
+     you'd miss. YouTube/Kick chats are heavyweight iframes, so those stay lazy. */
+  const chatFeeds = streams.filter(s =>
+    s.platform === 'twitch' || chatLoaded.current.has(s.key))
   const hasTwitch = streams.some(s => s.platform === 'twitch')
 
   /* layout is a set of %-rects over one flat container; a fullscreened tile
@@ -2137,6 +2231,7 @@ export default function App() {
     locked: locked === s.key,
     interactive: interactive === s.key,
     fullscreen: fullscreen === s.key,
+    pinged: !!pinged[s.key],
     vol: vols[s.key] ?? settings.startVol,
     pct: Math.round(gainFor(s.key, active === s.key) * 100),
     /* what the feed is ACTUALLY doing — its own mute, or silenced because
@@ -2288,7 +2383,7 @@ export default function App() {
             <div className="chat-body">
               {chatFeeds.map(s => s.platform === 'twitch' ? (
                 <TwitchChat key={s.key} channel={s.id} visible={activeChat === s.key} auth={auth}
-                  fontSize={settings.chatSize} />
+                  fontSize={settings.chatSize} onPing={() => onPing(s.key)} />
               ) : (
                 <iframe
                   key={s.key}
@@ -2359,6 +2454,17 @@ export default function App() {
             </Row>
             <Row label="New feeds muted">
               <Toggle on={settings.startMuted} onClick={() => set('startMuted', !settings.startMuted)} />
+            </Row>
+
+            <div className="set-grp">MENTIONS</div>
+            <Row label="Ping on mention" hint="Flash the feed and blip when chat talks to you">
+              <Toggle on={settings.ping} onClick={() => set('ping', !settings.ping)} />
+            </Row>
+            <Row label="Ping volume" value={`${Math.round(settings.pingVol * 100)}%`}>
+              <input type="range" min="0" max="100" step="5"
+                value={Math.round(settings.pingVol * 100)}
+                onChange={e => set('pingVol', Number(e.target.value) / 100)}
+                onMouseUp={() => settings.ping && playPing(settings.pingVol)} />
             </Row>
 
             <div className="set-grp">WALL</div>

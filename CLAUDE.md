@@ -94,6 +94,11 @@ unhover — and the chat panel swaps to that stream's chat.
   active-feed zoom, retro texture, chat panel width, chat text size. The hover boost feeds the
   headroom mix (idle = `base / (1 + boost)`), so changing it re-tunes both the gain and the
   displayed percentage.
+- **Mention ping**: a message that @mentions you, names you bare, or replies to one of yours
+  flashes that feed's tile red and plays a synthesised two-blip tone (no audio asset). This is
+  why **every twitch feed keeps an IRC socket open**, not just the one whose chat is on screen
+  — the mention you'd actually miss is on the stream you're not looking at. YouTube/Kick chats
+  are heavyweight iframes so those stay lazy. Toggle + volume live in settings.
 - **Fast-chat throughput**: incoming IRC lines buffer in a ref and commit once every
   `FLUSH_MS` (120ms), and each row is a memoised `<Msg>`. Committing per message re-rendered
   the whole 150-row backlog and re-pinned the scroll dozens of times a second, which is what
