@@ -67,9 +67,12 @@ unhover — and the chat panel swaps to that stream's chat.
   destroy and rebuild its iframe — i.e. every stream reloads on fullscreen / add / remove.
   Do not reintroduce row wrappers.
 - **Fullscreen**: the tile's rect goes to 0,0,100,100; the others stay MOUNTED but hidden
-  (`.tile.off`) and paused via `api.setPaused` — pausing stops them streaming without the
-  reload that unmounting would cause on the way back out. Esc exits. (Kick has no player API,
-  so a backgrounded kick feed can't be paused.)
+  (`.tile.off`), muted, and dropped to their **lowest rendition** via `api.setLowQuality`
+  (twitch: last entry of `getQualities()`, restored to the saved quality on exit). Esc exits.
+  Do NOT pause them — that was the old behaviour and it forces a rebuffer and a jump to the
+  live edge on the way back, i.e. exactly the interruption fullscreen is supposed to avoid.
+  (YouTube ignores quality requests these days, so it's best-effort there; Kick has no player
+  API at all.)
 - **Keyboard** (acts on the active feed, ignored while typing in any input): `m` mute,
   `space` play/pause, `f` fullscreen, `esc` exit fullscreen, `h` hide/pin the top bar.
 - **Hidden top bar** (`h`, or the caret button beside the feed count): the header leaves the

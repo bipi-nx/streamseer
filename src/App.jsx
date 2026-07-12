@@ -754,6 +754,7 @@ function TwitchMount({ id, onApi, onLive }) {
         channel: id, width: '100%', height: '100%',
         parent: [window.location.hostname], autoplay: true, muted: true,
       })
+      let savedQ = null
       player.addEventListener(P.READY, () => {
         if (dead) return
         onApi({
@@ -761,6 +762,22 @@ function TwitchMount({ id, onApi, onLive }) {
           setMuted: m => player.setMuted(m),
           setPaused: p => (p ? player.pause() : player.play()),
           toggle: () => (player.isPaused() ? player.play() : player.pause()),
+          /* backgrounded by fullscreen: drop to the lowest rendition and keep
+             rolling. Pausing would force a rebuffer and a jump to the live edge
+             on the way back — this way the feed is never interrupted. */
+          setLowQuality: low => {
+            try {
+              if (low) {
+                const qs = player.getQualities() || []
+                if (!qs.length) return
+                if (!savedQ) savedQ = player.getQuality()
+                player.setQuality(qs[qs.length - 1].group)   // last = lowest
+              } else if (savedQ) {
+                player.setQuality(savedQ)
+                savedQ = null
+              }
+            } catch { /* quality API unavailable on this embed */ }
+          },
         })
       })
       /* Eligible for activation once it has actually started playing. Gates
@@ -827,6 +844,11 @@ function YouTubeMount({ id, onApi, onTitle, onLive }) {
               setVol: v => e.target.setVolume(Math.round(v * 100)),
               setMuted: m => (m ? e.target.mute() : e.target.unMute()),
               setPaused: p => (p ? e.target.pauseVideo() : e.target.playVideo()),
+              /* youtube ignores quality requests these days (it picks its own),
+                 so this is best-effort — it never pauses, which is the point */
+              setLowQuality: low => {
+                try { e.target.setPlaybackQuality(low ? 'tiny' : 'default') } catch { /* no-op */ }
+              },
               /* 1 = PLAYING */
               toggle: () => (e.target.getPlayerState() === 1 ? e.target.pauseVideo() : e.target.playVideo()),
               /* only force playback if it never started — never fight a
@@ -1674,7 +1696,7 @@ export default function App() {
 
   const apis = useRef(new Map())
   const chatLoaded = useRef(new Set())
-  const pausedNow = useRef(new Map())   // key -> last setPaused we issued
+  const qualityNow = useRef(new Map())   // key -> last setLowQuality we issued
 
   /* which feeds have actually started playing — a still-loading feed must
      never become active (no solo, no gain, no zoom, no chat takeover) */
@@ -1856,17 +1878,17 @@ export default function App() {
          cursor crossed the wall. Unlocking restores each feed to its own mute
          state and level, since nothing here is persisted on the feeds. */
       const soloed = settings.soloOnLock && locked !== null && locked !== s.key
-      api.setMuted(muted[s.key] === true || soloed)
+      const backgrounded = !!fullscreen && fullscreen !== s.key
+      api.setMuted(muted[s.key] === true || soloed || backgrounded)
 
-      /* fullscreen backgrounds the others: pause rather than unmount, so they
-         stop streaming but come straight back without reloading. only fire on
-         a change — re-issuing play() every render would fight the user. */
-      if (api.setPaused) {
-        const want = !!fullscreen && fullscreen !== s.key
-        if (pausedNow.current.get(s.key) !== want) {
-          pausedNow.current.set(s.key, want)
-          api.setPaused(want)
-        }
+      /* Fullscreen backgrounds the others: drop them to their lowest rendition
+         and let them keep playing. Pausing (what this used to do) forces a
+         rebuffer and a jump to the live edge on the way back — this way there's
+         no interruption at all. Only fire on a change, or we'd re-issue the
+         quality switch every render. */
+      if (api.setLowQuality && qualityNow.current.get(s.key) !== backgrounded) {
+        qualityNow.current.set(s.key, backgrounded)
+        api.setLowQuality(backgrounded)
       }
     }
   })
