@@ -1274,10 +1274,16 @@ async function validateToken(token) {
     })
     if (!r.ok) return null
     const d = await r.json()
-    /* keep the granted scopes — twitch can hand back a token with FEWER
-       scopes than requested (silent re-auth reuses a prior grant), and that
-       silently disables the user's own emote list */
-    return { token, login: d.login, userId: d.user_id, scopes: d.scopes || [] }
+    /* Keep the granted scopes — twitch can hand back a token with FEWER scopes
+       than requested (silent re-auth reuses a prior grant), which silently
+       disables the user's own emote list. Keep client_id too: a token is bound
+       to the app that issued it, so a token from the dev app still VALIDATES
+       against the prod app but every Helix call with it 401s. */
+    return {
+      token, login: d.login, userId: d.user_id,
+      scopes: d.scopes || [],
+      clientId: d.client_id,
+    }
   } catch {
     return null
   }
@@ -1912,11 +1918,22 @@ export default function App() {
       if (!stored) return
       const ok = await validateToken(stored.token)
       if (dead) return
-      if (!ok) {
+
+      const drop = reason => {
         setAuth(null)
         localStorage.removeItem(AUTH_KEY)
-        say('TWITCH SESSION EXPIRED — RECONNECT')
+        say('TWITCH ' + reason + ' — RECONNECT', 6000)
       }
+
+      if (!ok) { drop('SESSION EXPIRED'); return }
+      /* a token issued by a different app validates fine but 401s on every
+         Helix call — treat it as dead rather than let it half-work */
+      if (ok.clientId && ok.clientId !== TWITCH_CLIENT_ID) { drop('APP CHANGED'); return }
+      /* re-auth is the only way to pick up a scope added since they signed in */
+      if (!(ok.scopes || []).includes('user:read:emotes')) { drop('PERMISSIONS UPDATED'); return }
+      /* refresh the stored record so it carries the newer fields */
+      setAuth(ok)
+      localStorage.setItem(AUTH_KEY, JSON.stringify(ok))
     })()
     return () => { dead = true }
   }, [say])

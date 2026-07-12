@@ -121,6 +121,12 @@ unhover — and the chat panel swaps to that stream's chat.
   on ready, retries on UNSTARTED(-1)/CUED(5), and `api.ensurePlaying()` is called on the first
   user gesture and on clicking a not-yet-playing tile. It never forces play on a feed that has
   already started, so a deliberate pause is respected. Twitch's embed autostarts on its own.
+- **The token survives deploys.** It lives in localStorage per-origin, so shipping new code
+  never signs anyone out. It IS dropped (with a toast naming the reason) when: the token
+  expired; its `client_id` doesn't match the app this origin now uses (a token from the dev app
+  validates fine against the prod app but 401s on every Helix call — don't let it half-work);
+  or it lacks a scope added since sign-in (re-auth is the only way to gain a scope). Adding a
+  scope or switching the app therefore forces one re-login for everyone — batch those changes.
 - **Twitch login is optional**: `VITE_TWITCH_CLIENT_ID` (in `.env`, committed — implicit
   OAuth has no secret, the ID is public). CONNECT TWITCH runs the implicit flow, the token
   lands in the URL fragment, is validated against id.twitch.tv/oauth2/validate, and is kept
