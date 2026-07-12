@@ -207,8 +207,10 @@ header{
 @keyframes armPulse{0%,100%{box-shadow:0 0 0 0 #ff443800}50%{box-shadow:0 0 14px 0 #ff443859}}
 .tw-glyph{flex:none;display:block}
 
-.composer{flex:none;position:relative;display:flex;gap:6px;padding:7px;
-  border-top:1px solid var(--line);background:var(--panel2)}
+/* the composer is part of the chat surface, so it wears twitch's chrome:
+   Inter 13px on #18181b, rounded input, purple focus ring */
+.composer{flex:none;position:relative;display:flex;gap:6px;padding:8px 10px 10px;
+  border-top:1px solid #2f2f35;background:#18181b}
 
 /* ---------- emote tab-completion bubble ---------- */
 .sugg{
@@ -231,7 +233,7 @@ header{
 .sugg-row{
   width:100%;display:flex;align-items:center;gap:9px;padding:5px 8px;
   background:transparent;border:none;border-left:2px solid transparent;cursor:pointer;
-  font-family:var(--mono);text-align:left;
+  font-family:Inter,'Helvetica Neue',Helvetica,Arial,sans-serif;text-align:left;
 }
 .sugg-row.on{background:#a970ff1f;border-left-color:var(--tw)}
 .sugg-img{flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center}
@@ -245,15 +247,23 @@ header{
 .src-7tv{color:#29d8a4} .src-twitch{color:var(--tw)}
 .src-channel{color:var(--amber)} .src-sub{color:#ff8ab5} .src-emoji{color:var(--dim)}
 .composer input{
-  flex:1;min-width:0;background:#080a0e;border:1px solid var(--line);color:var(--text);
-  font-family:var(--mono);font-size:11px;padding:7px 9px;outline:none;transition:border-color .15s}
-.composer input:focus{border-color:var(--tw)}
+  flex:1;min-width:0;
+  background:#0e0e10;border:2px solid #3f3f46;border-radius:4px;color:#efeff1;
+  font-family:Inter,'Helvetica Neue',Helvetica,Arial,sans-serif;
+  font-size:13px;line-height:20px;padding:8px 10px;outline:none;
+  transition:border-color .12s, background .12s;
+}
+.composer input:hover{border-color:#4d4d55}
+.composer input:focus{background:#000;border-color:var(--tw)}
 .composer input::placeholder{color:#adadb8}
 /* scoped to the send button — .sugg-row is also a button inside .composer */
 .composer > button[type=submit]{
-  flex:none;background:var(--tw);color:#0d0616;border:none;cursor:pointer;
-  font-size:11px;padding:0 12px;transition:opacity .15s}
-.composer > button[type=submit]:disabled{opacity:.3;cursor:default}
+  flex:none;background:var(--tw);color:#fff;border:none;border-radius:4px;cursor:pointer;
+  font-family:Inter,'Helvetica Neue',Helvetica,Arial,sans-serif;
+  font-size:13px;padding:0 14px;transition:background .12s, opacity .15s;
+}
+.composer > button[type=submit]:hover:not(:disabled){background:#bf94ff}
+.composer > button[type=submit]:disabled{opacity:.35;cursor:default}
 
 /* ---------- main ---------- */
 main{flex:1;display:flex;min-height:0}
@@ -1728,10 +1738,37 @@ export default function App() {
     return Math.min(1, isActive ? base : base / (1 + settings.boost))
   }, [vols, settings.startVol, settings.master, settings.headroom, settings.boost])
 
+  /* Fullscreen takes the whole SCREEN (browser Fullscreen API), not just the
+     app frame. The app root is what goes fullscreen — not the tile — so the
+     header and the chat panel come with it and stay usable. */
+  const fsRef = useRef(null)
+  fsRef.current = fullscreen
+  const appRef = useRef(null)
+
   const onFullscreen = useCallback(key => {
-    setFullscreen(f => (f === key ? null : key))
+    const next = fsRef.current === key ? null : key
+    const el = appRef.current
+    /* must be called straight from the click/keypress — a user gesture */
+    try {
+      if (next && !document.fullscreenElement && el && el.requestFullscreen) {
+        el.requestFullscreen().catch(() => { /* denied — the wall still expands */ })
+      } else if (!next && document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => { /* already out */ })
+      }
+    } catch { /* unsupported — fall back to the in-app expand */ }
+    setFullscreen(next)
     setActiveChat(key)
     chatLoaded.current.add(key)
+  }, [])
+
+  /* leaving via Esc or F11 is a browser-level exit — sync our state to it, or
+     the wall would stay expanded with no way back */
+  useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement && fsRef.current) setFullscreen(null)
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
   /* keyboard: m mute, space play/pause, f fullscreen — all act on the active
@@ -1752,6 +1789,12 @@ export default function App() {
       if (e.key.toLowerCase() === 'h' && streams.length) {
         e.preventDefault()
         setChromeOff(v => !v)
+        return
+      }
+      /* chat toggle — reachable in fullscreen without hunting for the button */
+      if (e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        setChatOpen(v => !v)
         return
       }
       if (!active) return
@@ -2046,8 +2089,11 @@ export default function App() {
   const barHidden = chromeOff && n > 0
 
   return (
-    <div className={'app' + (barHidden ? ' chrome-off' : '') + (barHidden && peek ? ' peek' : '')
-      + (settings.texture ? '' : ' no-texture')}>
+    <div
+      ref={appRef}
+      className={'app' + (barHidden ? ' chrome-off' : '') + (barHidden && peek ? ' peek' : '')
+        + (settings.texture ? '' : ' no-texture')}
+    >
       <style>{css}</style>
       {settings.texture && <div className="grain" />}
       {barHidden && <div className="peekzone" onMouseEnter={() => setPeek(true)} />}

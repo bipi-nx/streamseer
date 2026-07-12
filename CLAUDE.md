@@ -74,7 +74,13 @@ unhover — and the chat panel swaps to that stream's chat.
   (YouTube ignores quality requests these days, so it's best-effort there; Kick has no player
   API at all.)
 - **Keyboard** (acts on the active feed, ignored while typing in any input): `m` mute,
-  `space` play/pause, `f` fullscreen, `esc` exit fullscreen, `h` hide/pin the top bar.
+  `space` play/pause, `f` fullscreen, `esc` exit fullscreen, `h` hide/pin the top bar,
+  `c` toggle chat.
+- **True fullscreen**: `onFullscreen` calls `requestFullscreen()` on the **app root**, not the
+  tile — so the header and chat panel come with it and stay usable (chat toggles with the
+  button or `c`). It must be called straight from the click/keypress or the browser rejects it
+  as a non-gesture. A `fullscreenchange` listener syncs our state when the user leaves via
+  Esc/F11, or the wall would stay expanded with no way back.
 - **Hidden top bar** (`h`, or the caret button beside the feed count): the header leaves the
   flow when hidden, so the wall claims the full viewport height; nudging the cursor to the top
   edge peeks it back (it overlays, so the wall doesn't reflow). Persisted in localStorage so a
