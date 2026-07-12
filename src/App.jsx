@@ -14,7 +14,14 @@ const CHROME_KEY = 'streamseer:chrome'
 const SET_KEY = 'streamseer:settings'
 
 const DEFAULTS = {
+  master: 1,           // global volume, scales every feed
   boost: 0.5,          // hover gain, +50%
+  /* Headroom: embeds can't amplify past their own max, so a guaranteed hover
+     boost at ANY level means holding idle feeds at base/(1+boost) and giving
+     the active one the full range. The cost is that a feed set to 100% idles at
+     67% of what the player can do — which reads as "100% is quiet". Off by
+     default: feeds run flat out and the boost simply clips near the ceiling. */
+  headroom: false,
   soloOnLock: true,    // locking a feed mutes the rest
   startVol: 0.5,       // level new feeds arrive at
   startMuted: false,   // ...and whether they arrive muted
@@ -1511,8 +1518,9 @@ function TwitchGlyph() {
 
 /* ---------- tile ---------- */
 function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, hidden, fullscreen,
-  boost, onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive }) {
-  const shownPct = Math.round(vol * 100 * (hovered ? 1 + boost : 1))
+  pct, onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle, onFullscreen, onLive }) {
+  /* what the player is really doing, after master + headroom + boost */
+  const shownPct = pct
   const hasVolApi = stream.platform !== 'kick'
   const apiCb = useCallback(api => onApi(stream.key, api), [onApi, stream.key])
   const titleCb = useCallback(t => onTitle(stream.key, t), [onTitle, stream.key])
@@ -1687,6 +1695,17 @@ export default function App() {
   const eligible = key => !!key && live[key] === true
   const active = fullscreen || (eligible(locked) ? locked : null) || (eligible(hovered) ? hovered : null)
 
+  /* Single source of truth for what a feed actually plays at — the audio effect
+     and the on-tile percentage both read this, so they can never disagree. */
+  const gainFor = useCallback((key, isActive) => {
+    const base = (vols[key] ?? settings.startVol) * settings.master
+    if (!settings.headroom) {
+      /* flat out: every feed runs at its full level, the boost just clips */
+      return Math.min(1, isActive ? base * (1 + settings.boost) : base)
+    }
+    return Math.min(1, isActive ? base : base / (1 + settings.boost))
+  }, [vols, settings.startVol, settings.master, settings.headroom, settings.boost])
+
   const onFullscreen = useCallback(key => {
     setFullscreen(f => (f === key ? null : key))
     setActiveChat(key)
@@ -1831,12 +1850,7 @@ export default function App() {
     for (const s of streams) {
       const api = apis.current.get(s.key)
       if (!api) continue
-      /* headroom mix: the player can't amplify past its own max, so idle feeds
-         sit at base/(1+boost) and the active one gets the full range — a true
-         boost at any level rather than one that clips */
-      const base = vols[s.key] ?? settings.startVol
-      const head = 1 + settings.boost
-      api.setVol(active === s.key ? base : base / head)
+      api.setVol(gainFor(s.key, active === s.key))
       /* Only a LOCK solos. Hovering boosts the target's gain but leaves the
          others audible — muting on mere hover made the mix flicker as the
          cursor crossed the wall. Unlocking restores each feed to its own mute
@@ -1973,7 +1987,7 @@ export default function App() {
     interactive: interactive === s.key,
     fullscreen: fullscreen === s.key,
     vol: vols[s.key] ?? settings.startVol,
-    boost: settings.boost,
+    pct: Math.round(gainFor(s.key, active === s.key) * 100),
     /* what the feed is ACTUALLY doing — its own mute, or silenced because
        another feed holds the lock. the icon must show the truth either way. */
     muted: muted[s.key] === true
@@ -2145,6 +2159,14 @@ export default function App() {
             </div>
 
             <div className="set-grp">AUDIO</div>
+            <Row label="Global volume" value={`${Math.round(settings.master * 100)}%`}>
+              <input type="range" min="0" max="100" step="5"
+                value={Math.round(settings.master * 100)}
+                onChange={e => set('master', Number(e.target.value) / 100)} />
+            </Row>
+            <Row label="Full volume" hint="100% means the player's max. Off reserves room for the boost">
+              <Toggle on={!settings.headroom} onClick={() => set('headroom', !settings.headroom)} />
+            </Row>
             <Row label="Hover boost" value={`+${Math.round(settings.boost * 100)}%`}>
               <input type="range" min="0" max="100" step="5"
                 value={Math.round(settings.boost * 100)}

@@ -13,10 +13,17 @@ unhover — and the chat panel swaps to that stream's chat.
 - Embeds: Twitch Embed JS API, YouTube IFrame API, Kick plain iframe
 
 ## How the core mechanics work (don't "fix" these)
-- **Hover gain**: volume state lives in React (`vols`, 0–1). Embeds can't amplify past
-  their own max, so the mix reserves headroom: idle feeds play at `vol / 1.5` of player
-  range and hover uses the full range — a true, unclipped +50% at any slider level (UI
-  shows up to 150%). A post-render effect pushes this to every live player.
+- **Gain**: `gainFor(key, isActive)` is the single source of truth — the audio effect and the
+  on-tile percentage both read it, so they can't disagree. `base = vol * master`, then:
+  - `headroom: false` (**default**) — feeds run flat out (`base`), the hover boost clips
+    against the ceiling. 100% genuinely means the player's max.
+  - `headroom: true` — idle feeds sit at `base / (1 + boost)` so the boost is unclipped at any
+    level. The cost is that a feed set to 100% idles at 67%, which reads as *"100% is quiet"*.
+    This used to be the default and was a real complaint. Don't make it the default again.
+- **Volume cannot exceed 100%.** Embeds are cross-origin iframes, so a Web Audio gain node
+  can't be attached to the media element — only the player's own `setVolume` is reachable, and
+  it caps at its max. Browser extensions boost past this because they run privileged code
+  *inside* the iframe. Don't add a >100% slider; it would silently clamp.
 - **Only a LOCK solos, never a hover.** Hovering boosts the target's gain but leaves the
   other feeds audible — muting on mere hover made the mix flicker as the cursor crossed the
   wall. Locking mutes everything else; unlocking restores each feed to its own mute state and
