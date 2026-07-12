@@ -486,6 +486,9 @@ main{flex:1;display:flex;min-height:0}
 .msg .sep{color:#efeff1}
 .msg .txt{color:#efeff1}
 .msg .txt.action{font-style:italic}
+/* twitch's link purple; the message row still hovers, links just take priority */
+.msg a{color:#bf94ff;text-decoration:none;cursor:pointer}
+.msg a:hover{text-decoration:underline}
 .msg .badge{
   display:inline-block;font-size:9px;font-weight:600;line-height:14px;
   height:16px;min-width:16px;padding:0 3px;margin-right:4px;text-align:center;
@@ -1074,6 +1077,22 @@ function segmentTwitchEmotes(text, emotesTag) {
 
 const BADGE_MAP = { broadcaster: ['BC', 'b-bc'], moderator: ['MOD', 'b-mod'], vip: ['VIP', 'b-vip'], subscriber: ['SUB', 'b-sub'] }
 
+/* Linkify the way chat clients do: an explicit scheme, a www. host, or a bare
+   host on a common TLD. Trailing punctuation is left out of the href — "see
+   twitch.tv/x." must not link to "x." — and the visible text stays verbatim. */
+const TLDS = 'com|net|org|tv|gg|io|co|uk|de|jp|dev|app|me|xyz|edu|gov|info|link|live|art|to|ly|be|fm'
+const LINK_RE = new RegExp(
+  `^(https?:\\/\\/[^\\s]+|www\\.[^\\s]+|[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:${TLDS})(?:[\\/?#][^\\s]*)?)$`, 'i',
+)
+
+function asLink(word) {
+  const m = word.match(/^([^\w]*)(.*?)([.,!?;:)\]}'"]*)$/s)
+  const [, lead, core, tail] = m
+  if (!core || !LINK_RE.test(core)) return null
+  const href = /^https?:\/\//i.test(core) ? core : 'https://' + core
+  return { lead, core, tail, href }
+}
+
 /* memoised so a burst of new messages doesn't re-render the whole backlog —
    in a fast chat that re-render is what stops the pane keeping up with scroll */
 const Msg = memo(function Msg({ msg, emoteMap, canReply, onCopy, onReply }) {
@@ -1125,9 +1144,14 @@ function MsgBody({ text, emotesTag, emoteMap }) {
       for (const w of seg.s.split(/(\s+)/)) {
         if (!w) continue
         const e = /\S/.test(w) ? emoteMap.get(w) : null
-        if (!e) { pieces.push(w); continue }
-        if (e.char) { pieces.push(e.char); continue }   // emoji → plain glyph
-        pieces.push({ url: e.url, name: w, zw: e.zw, overlays: [] })
+        if (e) {
+          if (e.char) { pieces.push(e.char); continue }   // emoji → plain glyph
+          pieces.push({ url: e.url, name: w, zw: e.zw, overlays: [] })
+          continue
+        }
+        const link = /\S/.test(w) ? asLink(w) : null
+        if (link) { pieces.push({ link }); continue }
+        pieces.push(w)
       }
     }
   }
@@ -1137,7 +1161,7 @@ function MsgBody({ text, emotesTag, emoteMap }) {
     if (typeof p === 'object' && p.zw) {
       let j = folded.length - 1
       while (j >= 0 && typeof folded[j] === 'string' && !folded[j].trim()) j--
-      if (j >= 0 && typeof folded[j] === 'object') {
+      if (j >= 0 && typeof folded[j] === 'object' && folded[j].url) {
         folded[j].overlays.push(p)
         folded.length = j + 1
         continue
@@ -1145,14 +1169,25 @@ function MsgBody({ text, emotesTag, emoteMap }) {
     }
     folded.push(p)
   }
-  return folded.map((p, i) =>
-    typeof p === 'string' ? p : (
+  return folded.map((p, i) => {
+    if (typeof p === 'string') return p
+    if (p.link) {
+      const { lead, core, tail, href } = p.link
+      return (
+        <span key={i}>
+          {lead}
+          <a href={href} target="_blank" rel="noopener noreferrer nofollow">{core}</a>
+          {tail}
+        </span>
+      )
+    }
+    return (
       <span className="emw" key={i} title={p.name}>
         <img src={p.url} alt={p.name} loading="lazy" />
         {p.overlays.map((o, k) => <img className="zw" key={k} src={o.url} alt={o.name} loading="lazy" />)}
       </span>
     )
-  )
+  })
 }
 
 /* ---------- twitch oauth (implicit flow — no backend, no secret) ---------- */
