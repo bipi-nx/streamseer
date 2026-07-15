@@ -650,6 +650,16 @@ main{flex:1;display:flex;min-height:0}
 `
 
 /* ---------- link parsing ---------- */
+/* youtube video ids are exactly 11 url-safe chars. anything else here is a
+   channel name masquerading as an id (e.g. /yt/ludwig -> "ludwig"), which
+   produces a broken embed — reject it so the user gets told why */
+const YT_ID = /^[A-Za-z0-9_-]{11}$/
+function ytVideo(id) {
+  if (!id) return null
+  if (!YT_ID.test(id)) return { error: 'youtube-channel' }
+  return { platform: 'youtube', id, label: 'YT ' + id }
+}
+
 function parseStream(raw) {
   const t = raw.trim()
   if (!t) return null
@@ -674,14 +684,15 @@ function parseStream(raw) {
     return null
   }
   if (host === 'youtu.be') {
-    return seg[0] ? { platform: 'youtube', id: seg[0], label: 'YT ' + seg[0] } : null
+    return ytVideo(seg[0])
   }
   if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
     const v = url.searchParams.get('v')
-    if (v) return { platform: 'youtube', id: v, label: 'YT ' + v }
-    if ((seg[0] === 'live' || seg[0] === 'embed') && seg[1]) {
-      return { platform: 'youtube', id: seg[1], label: 'YT ' + seg[1] }
-    }
+    if (v) return ytVideo(v)
+    if ((seg[0] === 'live' || seg[0] === 'embed') && seg[1]) return ytVideo(seg[1])
+    /* a channel handle / vanity url / channel id — youtube can't embed "current
+       live" from any of these, so flag it for a targeted message */
+    if (seg[0]) return { error: 'youtube-channel' }
     return null
   }
   if (host === 'kick.com' || host === 'player.kick.com') {
@@ -1879,7 +1890,7 @@ function streamsFromPath(pathname) {
           : `kick.com/${raw}`
 
     const parsed = parseStream(asUrl)
-    if (!parsed) continue
+    if (!parsed || !parsed.platform) continue   // skip channel-shaped / bad ids
     const key = `${parsed.platform}:${parsed.id}`
     if (seen.has(key) || out.length >= MAX_FEEDS) continue
     seen.add(key)
@@ -2233,6 +2244,10 @@ export default function App() {
 
   const addStream = useCallback(raw => {
     const parsed = parseStream(raw)
+    if (parsed && parsed.error === 'youtube-channel') {
+      say('YOUTUBE NEEDS THE VIDEO LINK (YOUTUBE.COM/WATCH?V=…), NOT THE CHANNEL', 7000)
+      return
+    }
     if (!parsed) { say('UNRECOGNIZED LINK — TWITCH / YOUTUBE / KICK'); return }
     setStreams(prev => {
       if (prev.length >= MAX_FEEDS) { say(`WALL FULL — MAX ${MAX_FEEDS} FEEDS`); return prev }

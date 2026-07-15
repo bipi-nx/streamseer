@@ -162,9 +162,13 @@ unhover — and the chat panel swaps to that stream's chat.
 - No auth, no server — feeds persist in localStorage only
 
 ## Wall URLs
-`/t/k3soju/robinsongz/yt/ludwig` loads that wall on open. A platform token switches the
+`/t/k3soju/robinsongz/yt/jfKfPfyJRdk` loads that wall on open. A platform token switches the
 platform for everything after it (`t|ttv|twitch`, `yt|youtube|y`, `k|kick`); a bare path with
-no token defaults to twitch. The address bar is kept in sync with the wall via `replaceState`
+no token defaults to twitch. **YouTube entries must be the 11-char video ID** (the `watch?v=`
+value), NOT a channel name — youtube has no client-side "embed this channel's current live"
+(the old `embed/live_stream?channel=` throws Error 153). `parseStream` validates the id shape
+(`YT_ID`) and returns `{error:'youtube-channel'}` for channel handles/URLs so the add-form can
+say "needs the video link"; the path loader skips them. The address bar is kept in sync with the wall via `replaceState`
 (not `pushState` — adding a feed shouldn't stack history entries), so the URL is always
 copy-pasteable without a share button. A wall in the URL **overrides** the saved one.
 
