@@ -1968,6 +1968,8 @@ export default function App() {
   const apis = useRef(new Map())
   const chatLoaded = useRef(new Set())
   const qualityNow = useRef(new Map())   // key -> last setLowQuality we issued
+  const volNow = useRef(new Map())       // key -> last volume we pushed
+  const muteNow = useRef(new Map())      // key -> last mute we pushed
 
   /* which feeds have actually started playing — a still-loading feed must
      never become active (no solo, no gain, no zoom, no chat takeover) */
@@ -2197,14 +2199,26 @@ export default function App() {
     for (const s of streams) {
       const api = apis.current.get(s.key)
       if (!api) continue
-      api.setVol(gainFor(s.key, active === s.key))
+
+      /* Push volume/mute only when OUR computed target actually changes — not on
+         every render. Re-asserting every render fought the player's own controls:
+         mute via twitch's native UI, then a cursor move re-rendered and we called
+         setMuted(false) right back over it. Now the native mute survives until our
+         own logic (our mute button, a solo lock, fullscreen) genuinely changes it. */
+      const vol = gainFor(s.key, active === s.key)
+      if (volNow.current.get(s.key) !== vol) {
+        volNow.current.set(s.key, vol)
+        api.setVol(vol)
+      }
       /* Only a LOCK solos. Hovering boosts the target's gain but leaves the
-         others audible — muting on mere hover made the mix flicker as the
-         cursor crossed the wall. Unlocking restores each feed to its own mute
-         state and level, since nothing here is persisted on the feeds. */
+         others audible. Unlocking restores each feed to its own mute state. */
       const soloed = settings.soloOnLock && locked !== null && locked !== s.key
       const backgrounded = !!fullscreen && fullscreen !== s.key
-      api.setMuted(muted[s.key] === true || soloed || backgrounded)
+      const wantMuted = muted[s.key] === true || soloed || backgrounded
+      if (muteNow.current.get(s.key) !== wantMuted) {
+        muteNow.current.set(s.key, wantMuted)
+        api.setMuted(wantMuted)
+      }
 
       /* Fullscreen backgrounds the others: drop them to their lowest rendition
          and let them keep playing. Pausing (what this used to do) forces a
@@ -2239,8 +2253,16 @@ export default function App() {
   }, [])
 
   const onApi = useCallback((key, api) => {
-    if (api) apis.current.set(key, api)
-    else apis.current.delete(key)
+    if (api) {
+      apis.current.set(key, api)
+    } else {
+      /* player gone — forget what we last pushed, so a fresh player on the same
+         key (re-add, or a remount) gets our volume/mute re-applied from scratch */
+      apis.current.delete(key)
+      volNow.current.delete(key)
+      muteNow.current.delete(key)
+      qualityNow.current.delete(key)
+    }
     setApiTick(t => t + 1)
   }, [])
 
