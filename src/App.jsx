@@ -1714,7 +1714,7 @@ function TwitchGlyph() {
 }
 
 /* ---------- tile ---------- */
-function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, hidden, fullscreen,
+function Tile({ stream, hovered, locked, interactive, ready, vol, muted, index, rect, hidden, fullscreen,
   pinged, pct, onEnter, onLeave, onLock, onControls, onVol, onMute, onKill, onApi, onTitle,
   onFullscreen, onLive }) {
   /* what the player is really doing, after master + headroom + boost */
@@ -1798,7 +1798,13 @@ function Tile({ stream, hovered, locked, interactive, vol, muted, index, rect, h
         {stream.platform === 'youtube' && <YouTubeMount id={stream.id} onApi={apiCb} onTitle={titleCb} onLive={liveCb} />}
         {stream.platform === 'kick' && <KickMount id={stream.id} onLive={liveCb} />}
         <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
-        {!interactive && (
+        {/* the shield captures hover-to-lock, but it also swallows the click.
+            Twitch autoplays muted so it's already playing; YouTube shows a
+            thumbnail and needs the click ON its own play button to start (it
+            ignores a programmatic play). So don't cover a feed until it's
+            actually playing — a not-yet-live feed can't be locked anyway, and
+            this lets the start-click reach the player. */}
+        {ready && !interactive && (
           <>
             <div className="shield" onClick={() => onLock(stream.key)} />
             <div className="shield-ctl" onClick={() => onControls(stream.key)} />
@@ -2347,6 +2353,7 @@ export default function App() {
     hovered: active === s.key,
     locked: locked === s.key,
     interactive: interactive === s.key,
+    ready: live[s.key] === true,
     fullscreen: fullscreen === s.key,
     pinged: !!pinged[s.key],
     vol: vols[s.key] ?? settings.startVol,
